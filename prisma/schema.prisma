@@ -1,0 +1,62 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Phase {
+  GROUPS_1
+  GROUPS_2
+  GROUPS_3
+  ROUND_OF_16
+  QUARTER_FINAL
+  SEMI_FINAL
+  THIRD_PLACE
+  FINAL
+}
+
+model User {
+  id            Int          @id @default(autoincrement())
+  name          String
+  email         String       @unique
+  championPick  String?
+  topScorerPick String?
+  totalPoints   Int          @default(0)
+  groups1       Int          @default(0)
+  groups2       Int          @default(0)
+  groups3       Int          @default(0)
+  knockout      Int          @default(0)
+  predictions   Prediction[]
+}
+
+model Match {
+  id          Int          @id @default(autoincrement())
+  homeTeam    String
+  awayTeam    String
+  homeGoals   Int?
+  awayGoals   Int?
+  date        DateTime
+  phase       Phase
+  predictions Prediction[]
+}
+
+model Prediction {
+  id        Int   @id @default(autoincrement())
+  userId    Int
+  matchId   Int
+  homeGoals Int
+  awayGoals Int
+  points    Int   @default(0)
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  match Match @relation(fields: [matchId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, matchId])
+}
