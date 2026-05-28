@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { AdminModule } from './admin/admin.module';
+import { AuthModule } from './auth/auth.module';
 import { LeaderboardModule } from './leaderboard/leaderboard.module';
 import { MatchesModule } from './matches/matches.module';
 import { PointsModule } from './points/points.module';
@@ -16,6 +17,7 @@ import { UsersModule } from './users/users.module';
     PredictionsModule,
     LeaderboardModule,
     AdminModule,
+    AuthModule,
   ],
 })
 export class AppModule {}

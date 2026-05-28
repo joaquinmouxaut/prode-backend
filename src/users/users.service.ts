@@ -1,4 +1,10 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { Role } from '@prisma/client';
+import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
@@ -7,14 +13,32 @@ import { UpdateUserDto } from './dto/update-user.dto';
 export class UsersService {
   constructor(private readonly prisma: PrismaService) {}
 
+  private readonly safeUserSelect = {
+    id: true,
+    name: true,
+    email: true,
+    role: true,
+    championPick: true,
+    topScorerPick: true,
+    totalPoints: true,
+    groups1: true,
+    groups2: true,
+    groups3: true,
+    knockout: true,
+  } as const;
+
   findAll() {
     return this.prisma.user.findMany({
+      select: this.safeUserSelect,
       orderBy: { id: 'asc' },
     });
   }
 
   async findOne(id: number) {
-    const user = await this.prisma.user.findUnique({ where: { id } });
+    const user = await this.prisma.user.findUnique({
+      where: { id },
+      select: this.safeUserSelect,
+    });
     if (!user) {
       throw new NotFoundException(`User ${id} not found`);
     }
@@ -23,7 +47,18 @@ export class UsersService {
 
   async create(dto: CreateUserDto) {
     try {
-      return await this.prisma.user.create({ data: dto });
+      const { password, ...rest } = dto;
+      const passwordHash = await bcrypt.hash(password, 10);
+      const user = await this.prisma.user.create({
+        data: {
+          ...rest,
+          passwordHash,
+          role: Role.USER,
+        },
+      });
+      const { passwordHash, ...safeUser } = user;
+      void passwordHash;
+      return safeUser;
     } catch (e: unknown) {
       if (this.isUniqueConstraint(e)) {
         throw new ConflictException(`Email already in use: ${dto.email}`);
@@ -35,7 +70,11 @@ export class UsersService {
   async update(id: number, dto: UpdateUserDto) {
     await this.findOne(id);
     try {
-      return await this.prisma.user.update({ where: { id }, data: dto });
+      return await this.prisma.user.update({
+        where: { id },
+        data: dto,
+        select: this.safeUserSelect,
+      });
     } catch (e: unknown) {
       if (this.isUniqueConstraint(e)) {
         throw new ConflictException('Email already in use');
@@ -46,7 +85,10 @@ export class UsersService {
 
   async remove(id: number) {
     await this.findOne(id);
-    return this.prisma.user.delete({ where: { id } });
+    return this.prisma.user.delete({
+      where: { id },
+      select: this.safeUserSelect,
+    });
   }
 
   private isUniqueConstraint(e: unknown): boolean {

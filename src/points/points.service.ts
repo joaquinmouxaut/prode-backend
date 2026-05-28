@@ -25,7 +25,10 @@ const PHASE_MULTIPLIERS: Record<Phase, number> = {
 
 @Injectable()
 export class PointsService {
-  calculatePredictionPoints(prediction: PredictionScore, match: MatchScore): number {
+  calculatePredictionPoints(
+    prediction: PredictionScore,
+    match: MatchScore,
+  ): number {
     if (match.homeGoals === null || match.awayGoals === null) {
       return 0;
     }
@@ -37,7 +40,10 @@ export class PointsService {
 
     let basePoints = 0;
 
-    if (this.getOutcome(predHome, predAway) === this.getOutcome(realHome, realAway)) {
+    if (
+      this.getOutcome(predHome, predAway) ===
+      this.getOutcome(realHome, realAway)
+    ) {
       basePoints += 4;
     }
 

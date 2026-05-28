@@ -10,7 +10,11 @@ export class AdminService {
     private readonly pointsService: PointsService,
   ) {}
 
-  async setMatchResultAndRecalculate(matchId: number, homeGoals: number, awayGoals: number) {
+  async setMatchResultAndRecalculate(
+    matchId: number,
+    homeGoals: number,
+    awayGoals: number,
+  ) {
     const existingMatch = await this.prisma.match.findUnique({
       where: { id: matchId },
       select: { id: true },
@@ -43,7 +47,10 @@ export class AdminService {
         where: { id: prediction.id },
         data: {
           points: this.pointsService.calculatePredictionPoints(
-            { homeGoals: prediction.homeGoals, awayGoals: prediction.awayGoals },
+            {
+              homeGoals: prediction.homeGoals,
+              awayGoals: prediction.awayGoals,
+            },
             prediction.match,
           ),
         },
@@ -69,7 +76,13 @@ export class AdminService {
     const users = await this.prisma.user.findMany({ select: { id: true } });
     const totalsByUser = new Map<
       number,
-      { totalPoints: number; groups1: number; groups2: number; groups3: number; knockout: number }
+      {
+        totalPoints: number;
+        groups1: number;
+        groups2: number;
+        groups3: number;
+        knockout: number;
+      }
     >();
 
     for (const user of users) {
@@ -101,11 +114,12 @@ export class AdminService {
       }
     }
 
-    const userUpdates = Array.from(totalsByUser.entries()).map(([userId, totals]) =>
-      this.prisma.user.update({
-        where: { id: userId },
-        data: totals,
-      }),
+    const userUpdates = Array.from(totalsByUser.entries()).map(
+      ([userId, totals]) =>
+        this.prisma.user.update({
+          where: { id: userId },
+          data: totals,
+        }),
     );
 
     if (userUpdates.length > 0) {

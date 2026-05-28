@@ -22,10 +22,17 @@ enum Phase {
   FINAL
 }
 
+enum Role {
+  USER
+  ADMIN
+}
+
 model User {
   id            Int          @id @default(autoincrement())
   name          String
   email         String       @unique
+  passwordHash  String
+  role          Role         @default(USER)
   championPick  String?
   topScorerPick String?
   totalPoints   Int          @default(0)
