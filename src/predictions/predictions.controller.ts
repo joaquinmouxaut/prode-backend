@@ -8,9 +8,7 @@ import {
   Patch,
   Post,
   Query,
-  UseGuards,
 } from '@nestjs/common';
-import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CreatePredictionDto } from './dto/create-prediction.dto';
 import { UpdatePredictionDto } from './dto/update-prediction.dto';
 import { PredictionsService } from './predictions.service';
@@ -20,7 +18,6 @@ export class PredictionsController {
   constructor(private readonly predictionsService: PredictionsService) {}
 
   @Post()
-  @UseGuards(JwtAuthGuard)
   create(@Body() dto: CreatePredictionDto) {
     return this.predictionsService.create(dto);
   }
@@ -39,7 +36,6 @@ export class PredictionsController {
   }
 
   @Patch(':id')
-  @UseGuards(JwtAuthGuard)
   update(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: UpdatePredictionDto,
@@ -48,7 +44,6 @@ export class PredictionsController {
   }
 
   @Delete(':id')
-  @UseGuards(JwtAuthGuard)
   remove(@Param('id', ParseIntPipe) id: number) {
     return this.predictionsService.remove(id);
   }

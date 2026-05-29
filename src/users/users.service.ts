@@ -49,16 +49,14 @@ export class UsersService {
     try {
       const { password, ...rest } = dto;
       const passwordHash = await bcrypt.hash(password, 10);
-      const user = await this.prisma.user.create({
+      return await this.prisma.user.create({
         data: {
           ...rest,
           passwordHash,
           role: Role.USER,
         },
+        select: this.safeUserSelect,
       });
-      const { passwordHash, ...safeUser } = user;
-      void passwordHash;
-      return safeUser;
     } catch (e: unknown) {
       if (this.isUniqueConstraint(e)) {
         throw new ConflictException(`Email already in use: ${dto.email}`);

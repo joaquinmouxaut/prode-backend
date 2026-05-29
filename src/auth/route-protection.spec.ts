@@ -1,13 +1,14 @@
 import { GUARDS_METADATA } from '@nestjs/common/constants';
 import { Role } from '@prisma/client';
 import { AdminController } from '../admin/admin.controller';
+import { LeaderboardController } from '../leaderboard/leaderboard.controller';
 import { MatchesController } from '../matches/matches.controller';
-import { PredictionsController } from '../predictions/predictions.controller';
+import { AuthController } from './auth.controller';
+import { IS_PUBLIC_KEY } from './decorators/public.decorator';
 import { ROLES_KEY } from './decorators/roles.decorator';
-import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { RolesGuard } from './guards/roles.guard';
 
-describe('Route protection metadata', () => {
+describe('Route access policy', () => {
   function getMethodTarget(
     prototype: object,
     methodName: string,
@@ -28,33 +29,26 @@ describe('Route protection metadata', () => {
     return guards.map((guard) => guard.name ?? '');
   }
 
-  it('protects mutative matches routes with JwtAuthGuard', () => {
-    expect(getGuardNames(MatchesController.prototype, 'create')).toContain(
-      JwtAuthGuard.name,
-    );
-    expect(getGuardNames(MatchesController.prototype, 'update')).toContain(
-      JwtAuthGuard.name,
-    );
-    expect(getGuardNames(MatchesController.prototype, 'remove')).toContain(
-      JwtAuthGuard.name,
-    );
+  it('marks only auth register/login as public', () => {
+    expect(
+      Reflect.getMetadata(IS_PUBLIC_KEY, AuthController.prototype.register),
+    ).toBe(true);
+    expect(
+      Reflect.getMetadata(IS_PUBLIC_KEY, AuthController.prototype.login),
+    ).toBe(true);
   });
 
-  it('protects mutative predictions routes with JwtAuthGuard', () => {
-    expect(getGuardNames(PredictionsController.prototype, 'create')).toContain(
-      JwtAuthGuard.name,
-    );
-    expect(getGuardNames(PredictionsController.prototype, 'update')).toContain(
-      JwtAuthGuard.name,
-    );
-    expect(getGuardNames(PredictionsController.prototype, 'remove')).toContain(
-      JwtAuthGuard.name,
-    );
+  it('does not mark read routes as public', () => {
+    expect(
+      Reflect.getMetadata(IS_PUBLIC_KEY, MatchesController.prototype.findAll),
+    ).toBeUndefined();
+    expect(
+      Reflect.getMetadata(IS_PUBLIC_KEY, LeaderboardController.prototype.findAll),
+    ).toBeUndefined();
   });
 
-  it('requires admin role on admin result mutation route', () => {
+  it('requires admin role on admin result route', () => {
     expect(getGuardNames(AdminController.prototype, 'setMatchResult')).toEqual([
-      JwtAuthGuard.name,
       RolesGuard.name,
     ]);
     const adminTarget = getMethodTarget(
