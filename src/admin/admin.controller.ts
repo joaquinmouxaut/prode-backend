@@ -1,9 +1,11 @@
 import {
   Body,
   Controller,
+  Get,
   Param,
   ParseIntPipe,
   Patch,
+  Post,
   UseGuards,
 } from '@nestjs/common';
 import { Role } from '@prisma/client';
@@ -28,5 +30,33 @@ export class AdminController {
       body.homeGoals,
       body.awayGoals,
     );
+  }
+
+  @Post('matches/:id/unlock-sync')
+  @UseGuards(RolesGuard)
+  @Roles(Role.ADMIN)
+  unlockSync(@Param('id', ParseIntPipe) id: number) {
+    return this.adminService.clearManualOverride(id);
+  }
+
+  @Post('fixture/import')
+  @UseGuards(RolesGuard)
+  @Roles(Role.ADMIN)
+  importFixture() {
+    return this.adminService.importFixture();
+  }
+
+  @Get('sync/status')
+  @UseGuards(RolesGuard)
+  @Roles(Role.ADMIN)
+  getSyncStatus() {
+    return this.adminService.getSyncStatus();
+  }
+
+  @Post('sync/run')
+  @UseGuards(RolesGuard)
+  @Roles(Role.ADMIN)
+  runSyncNow() {
+    return this.adminService.runSyncNow();
   }
 }

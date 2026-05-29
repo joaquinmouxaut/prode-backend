@@ -27,6 +27,12 @@ enum Role {
   ADMIN
 }
 
+enum MatchResultSource {
+  ADMIN
+  API
+  IMPORT
+}
+
 model User {
   id            Int          @id @default(autoincrement())
   name          String
@@ -44,14 +50,19 @@ model User {
 }
 
 model Match {
-  id          Int          @id @default(autoincrement())
-  homeTeam    String
-  awayTeam    String
-  homeGoals   Int?
-  awayGoals   Int?
-  date        DateTime
-  phase       Phase
-  predictions Prediction[]
+  id            Int               @id @default(autoincrement())
+  externalId    String?           @unique
+  homeTeam      String
+  awayTeam      String
+  homeGoals     Int?
+  awayGoals     Int?
+  date          DateTime
+  phase         Phase
+  externalStatus String?
+  resultSource  MatchResultSource?
+  manualOverride Boolean          @default(false)
+  lastSyncedAt  DateTime?
+  predictions   Prediction[]
 }
 
 model Prediction {

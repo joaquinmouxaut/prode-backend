@@ -30,20 +30,29 @@ describe('Route access policy', () => {
   }
 
   it('marks only auth register/login as public', () => {
-    expect(
-      Reflect.getMetadata(IS_PUBLIC_KEY, AuthController.prototype.register),
-    ).toBe(true);
-    expect(
-      Reflect.getMetadata(IS_PUBLIC_KEY, AuthController.prototype.login),
-    ).toBe(true);
+    const registerTarget = getMethodTarget(
+      AuthController.prototype,
+      'register',
+    );
+    const loginTarget = getMethodTarget(AuthController.prototype, 'login');
+    expect(Reflect.getMetadata(IS_PUBLIC_KEY, registerTarget)).toBe(true);
+    expect(Reflect.getMetadata(IS_PUBLIC_KEY, loginTarget)).toBe(true);
   });
 
   it('does not mark read routes as public', () => {
+    const matchesFindAllTarget = getMethodTarget(
+      MatchesController.prototype,
+      'findAll',
+    );
+    const leaderboardFindAllTarget = getMethodTarget(
+      LeaderboardController.prototype,
+      'findAll',
+    );
     expect(
-      Reflect.getMetadata(IS_PUBLIC_KEY, MatchesController.prototype.findAll),
+      Reflect.getMetadata(IS_PUBLIC_KEY, matchesFindAllTarget),
     ).toBeUndefined();
     expect(
-      Reflect.getMetadata(IS_PUBLIC_KEY, LeaderboardController.prototype.findAll),
+      Reflect.getMetadata(IS_PUBLIC_KEY, leaderboardFindAllTarget),
     ).toBeUndefined();
   });
 
