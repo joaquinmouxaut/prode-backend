@@ -10,22 +10,12 @@ import { ResultRecalculationService } from '../results/result-recalculation.serv
 import { ApiFootballClient } from './api-football.client';
 import type { FixtureImportResult, PollingStatus } from './types';
 
-const LIVE_STATUSES = new Set([
-  '1H',
-  'HT',
-  '2H',
-  'ET',
-  'P',
-  'BT',
-  'SUSP',
-  'INT',
-]);
-const FINAL_STATUSES = new Set(['FT', 'AET', 'PEN']);
+const LIVE_STATUSES = new Set(['IN_PLAY', 'PAUSED']);
+const FINAL_STATUSES = new Set(['FINISHED', 'AWARDED', 'CANCELLED']);
 const ACTIVE_WINDOW_MS = 6 * 60 * 60 * 1000;
 
 type ImportExistingMatch = {
   id: number;
-  manualOverride: boolean;
 };
 
 type ActiveCandidateMatch = {
@@ -37,7 +27,7 @@ type MatchResultSource = 'ADMIN' | 'API' | 'IMPORT';
 interface FixtureMatchModel {
   findUnique(args: {
     where: { externalId: string };
-    select: { id: true; manualOverride: true };
+    select: { id: true };
   }): Promise<ImportExistingMatch | null>;
   create(args: {
     data: {
@@ -71,7 +61,6 @@ interface FixtureMatchModel {
   findMany(args: {
     where: {
       externalId: { not: null };
-      manualOverride: false;
       date: { lte: Date; gte: Date };
     };
     select: { externalStatus: true };
@@ -136,7 +125,6 @@ export class FixtureSyncService implements OnModuleInit, OnModuleDestroy {
     let createdMatches = 0;
     let updatedMatches = 0;
     let skippedUnknownPhase = 0;
-    let skippedManualOverride = 0;
 
     for (const fixture of fixtures) {
       teamNames.add(fixture.homeTeam);
@@ -149,7 +137,7 @@ export class FixtureSyncService implements OnModuleInit, OnModuleDestroy {
 
       const existing = await matchModel.findUnique({
         where: { externalId: fixture.externalId },
-        select: { id: true, manualOverride: true },
+        select: { id: true },
       });
 
       const baseData = {
@@ -176,11 +164,6 @@ export class FixtureSyncService implements OnModuleInit, OnModuleDestroy {
         continue;
       }
 
-      if (existing.manualOverride) {
-        skippedManualOverride += 1;
-        continue;
-      }
-
       await matchModel.update({
         where: { id: existing.id },
         data: {
@@ -197,7 +180,7 @@ export class FixtureSyncService implements OnModuleInit, OnModuleDestroy {
       createdMatches,
       updatedMatches,
       skippedUnknownPhase,
-      skippedManualOverride,
+      skippedManualOverride: 0,
       discoveredTeams: teamNames.size,
     };
   }
@@ -262,7 +245,7 @@ export class FixtureSyncService implements OnModuleInit, OnModuleDestroy {
         await this.apiFootballClient.fetchWorldCupActiveAndRecentlyFinishedFixtures();
       let syncedMatches = 0;
       let scoreChanges = 0;
-      let skippedByOverride = 0;
+      let skippedByFinalized = 0;
 
       for (const fixture of fixtures) {
         const sync = await this.recalcService.applyExternalResult({
@@ -278,8 +261,8 @@ export class FixtureSyncService implements OnModuleInit, OnModuleDestroy {
         }
 
         syncedMatches += 1;
-        if ('skipped' in sync && sync.skipped === 'manual_override') {
-          skippedByOverride += 1;
+        if ('skipped' in sync && sync.skipped === 'already_finalized') {
+          skippedByFinalized += 1;
         }
         if (
           'recalculatedPredictions' in sync &&
@@ -289,8 +272,8 @@ export class FixtureSyncService implements OnModuleInit, OnModuleDestroy {
         }
       }
 
-      this.lastPollResult = `ok:synced=${syncedMatches},score_changes=${scoreChanges},override_skips=${skippedByOverride}`;
-      return { trigger, syncedMatches, scoreChanges, skippedByOverride };
+      this.lastPollResult = `ok:synced=${syncedMatches},score_changes=${scoreChanges},finalized_skips=${skippedByFinalized}`;
+      return { trigger, syncedMatches, scoreChanges, skippedByFinalized };
     } catch (error) {
       this.lastPollResult = 'error';
       this.logger.error(
@@ -308,7 +291,6 @@ export class FixtureSyncService implements OnModuleInit, OnModuleDestroy {
     const candidates = await matchModel.findMany({
       where: {
         externalId: { not: null },
-        manualOverride: false,
         date: { lte: now, gte: windowStart },
       },
       select: { externalStatus: true },

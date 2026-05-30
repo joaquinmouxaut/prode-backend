@@ -19,9 +19,7 @@ export class AdminService {
       homeGoals,
       awayGoals,
       source: 'ADMIN',
-      setManualOverride: true,
-      bypassManualOverride: true,
-      externalStatus: 'MANUAL',
+      syncedAt: new Date(),
     });
   }
 

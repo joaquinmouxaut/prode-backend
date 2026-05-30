@@ -1,98 +1,119 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { mapExternalRoundToPhase } from './fixture-phase.mapper';
+import { mapExternalCompetitionStageToPhase } from './fixture-phase.mapper';
 import type { ExternalFixture } from './types';
 
-type ApiFootballFixtureItem = {
-  fixture?: {
-    id?: number;
-    date?: string;
-    status?: {
-      short?: string;
+type FootballDataMatchItem = {
+  id?: number;
+  utcDate?: string;
+  status?: string;
+  stage?: string;
+  matchday?: number | null;
+  homeTeam?: {
+    name?: string;
+  };
+  awayTeam?: {
+    name?: string;
+  };
+  score?: {
+    fullTime?: {
+      home?: number | null;
+      away?: number | null;
     };
   };
-  league?: {
-    round?: string;
-  };
-  teams?: {
-    home?: { name?: string };
-    away?: { name?: string };
-  };
-  goals?: {
-    home?: number | null;
-    away?: number | null;
-  };
 };
 
-type ApiFootballResponse = {
-  response?: ApiFootballFixtureItem[];
+type FootballDataApiResponse = {
+  error?: string;
+  message?: string;
+  matches?: FootballDataMatchItem[];
 };
 
-const DEFAULT_BASE_URL = 'https://v3.football.api-sports.io';
-const WORLD_CUP_LEAGUE_ID = 1;
-const WORLD_CUP_SEASON = 2026;
-const ACTIVE_STATUS_FILTER = '1H-HT-2H-ET-P-BT-SUSP-INT';
-const FINAL_STATUS_FILTER = 'FT-AET-PEN';
+const DEFAULT_BASE_URL = 'https://api.football-data.org/v4';
+const DEFAULT_WORLD_CUP_COMPETITION_CODE = 'WC';
+const DEFAULT_WORLD_CUP_SEASON = 2026;
+const SYNC_CANDIDATE_STATUSES = new Set([
+  'IN_PLAY',
+  'PAUSED',
+  'FINISHED',
+  'AWARDED',
+  'SUSPENDED',
+  'POSTPONED',
+  'CANCELLED',
+]);
 
 @Injectable()
 export class ApiFootballClient {
   private readonly logger = new Logger(ApiFootballClient.name);
-  private readonly apiKey = process.env.FOOTBALL_API_KEY?.trim();
+  private readonly apiKey = process.env.FOOTBALL_DATA_API_TOKEN?.trim();
   private readonly baseUrl =
-    process.env.FOOTBALL_API_BASE_URL?.trim() ?? DEFAULT_BASE_URL;
+    process.env.FOOTBALL_DATA_BASE_URL?.trim() ?? DEFAULT_BASE_URL;
+  private readonly competitionCode =
+    process.env.FOOTBALL_DATA_COMPETITION_CODE?.trim() ??
+    DEFAULT_WORLD_CUP_COMPETITION_CODE;
+  private readonly season = this.readNumericEnv(
+    'FOOTBALL_DATA_SEASON',
+    DEFAULT_WORLD_CUP_SEASON,
+  );
 
   isConfigured(): boolean {
     return Boolean(this.apiKey);
   }
 
   async fetchWorldCupFixtures(): Promise<ExternalFixture[]> {
-    const data = await this.request(
-      `/fixtures?league=${WORLD_CUP_LEAGUE_ID}&season=${WORLD_CUP_SEASON}`,
-    );
+    const data = await this.request(this.matchesPath());
     return this.toExternalFixtures(data);
   }
 
   async fetchWorldCupActiveAndRecentlyFinishedFixtures(): Promise<
     ExternalFixture[]
   > {
-    const data = await this.request(
-      `/fixtures?league=${WORLD_CUP_LEAGUE_ID}&season=${WORLD_CUP_SEASON}&status=${ACTIVE_STATUS_FILTER}-${FINAL_STATUS_FILTER}`,
+    const data = await this.request(this.matchesPath());
+    const filtered = (data.matches ?? []).filter((match) =>
+      SYNC_CANDIDATE_STATUSES.has((match.status ?? '').toUpperCase()),
     );
-    return this.toExternalFixtures(data);
+    return this.toExternalFixtures({ ...data, matches: filtered });
   }
 
-  private async request(path: string): Promise<ApiFootballResponse> {
+  private async request(path: string): Promise<FootballDataApiResponse> {
     if (!this.apiKey) {
-      throw new Error('Missing FOOTBALL_API_KEY env var');
+      throw new Error('Missing FOOTBALL_DATA_API_TOKEN env var');
     }
 
     const response = await fetch(`${this.baseUrl}${path}`, {
       headers: {
-        'x-apisports-key': this.apiKey,
+        'X-Auth-Token': this.apiKey,
       },
     });
 
     if (!response.ok) {
       const body = await response.text();
       this.logger.error(
-        `API-Football request failed: ${response.status} ${body}`,
+        `football-data request failed: ${response.status} ${body}`,
       );
       throw new Error(
-        `API-Football request failed with status ${response.status}`,
+        `football-data request failed with status ${response.status}`,
       );
     }
 
-    return (await response.json()) as ApiFootballResponse;
+    const data = (await response.json()) as FootballDataApiResponse;
+    if (data.error || data.message) {
+      const details = [data.error, data.message].filter(Boolean).join('; ');
+      this.logger.error(`football-data returned errors: ${details}`);
+      throw new Error(`football-data returned errors: ${details}`);
+    }
+
+    return data;
   }
 
-  private toExternalFixtures(data: ApiFootballResponse): ExternalFixture[] {
-    const fixtures = data.response ?? [];
+  private toExternalFixtures(data: FootballDataApiResponse): ExternalFixture[] {
+    const fixtures = data.matches ?? [];
     return fixtures
       .map((item) => {
-        const fixtureId = item.fixture?.id;
-        const date = item.fixture?.date;
-        const homeTeam = item.teams?.home?.name;
-        const awayTeam = item.teams?.away?.name;
-        const round = item.league?.round ?? '';
+        const fixtureId = item.id;
+        const date = item.utcDate;
+        const homeTeam = item.homeTeam?.name;
+        const awayTeam = item.awayTeam?.name;
+        const stage = item.stage ?? '';
         if (!fixtureId || !date || !homeTeam || !awayTeam) {
           return null;
         }
@@ -102,13 +123,34 @@ export class ApiFootballClient {
           date,
           homeTeam,
           awayTeam,
-          homeGoals: item.goals?.home ?? null,
-          awayGoals: item.goals?.away ?? null,
-          externalStatus: item.fixture?.status?.short ?? 'UNK',
-          round,
-          phase: mapExternalRoundToPhase(round),
+          homeGoals: item.score?.fullTime?.home ?? null,
+          awayGoals: item.score?.fullTime?.away ?? null,
+          externalStatus: item.status ?? 'UNKNOWN',
+          round: stage,
+          phase: mapExternalCompetitionStageToPhase(stage, item.matchday),
         } satisfies ExternalFixture;
       })
       .filter((fixture): fixture is ExternalFixture => fixture !== null);
+  }
+
+  private matchesPath(): string {
+    return `/competitions/${this.competitionCode}/matches?season=${this.season}`;
+  }
+
+  private readNumericEnv(name: string, fallback: number): number {
+    const raw = process.env[name];
+    if (!raw) {
+      return fallback;
+    }
+
+    const parsed = Number(raw);
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return parsed;
+    }
+
+    this.logger.warn(
+      `Invalid ${name} value "${raw}". Falling back to ${fallback}.`,
+    );
+    return fallback;
   }
 }

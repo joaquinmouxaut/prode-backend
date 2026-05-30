@@ -9,8 +9,7 @@ type ApplyMatchResultInput = {
   awayGoals: number;
   source: 'ADMIN' | 'API' | 'IMPORT';
   externalStatus?: string | null;
-  setManualOverride?: boolean;
-  bypassManualOverride?: boolean;
+  syncedAt?: Date;
 };
 
 type ApplyExternalResultInput = {
@@ -28,7 +27,8 @@ type MatchWithOverride = {
   phase: Phase;
   homeGoals: number | null;
   awayGoals: number | null;
-  manualOverride: boolean;
+  externalStatus: string | null;
+  lastSyncedAt: Date | null;
 };
 
 type MatchIdOnly = { id: number };
@@ -48,7 +48,8 @@ interface ResultMatchModel {
       phase: true;
       homeGoals: true;
       awayGoals: true;
-      manualOverride: true;
+      externalStatus: true;
+      lastSyncedAt: true;
     };
   }): Promise<MatchWithOverride | null>;
   findUnique(args: {
@@ -62,7 +63,8 @@ interface ResultMatchModel {
       phase: true;
       homeGoals: true;
       awayGoals: true;
-      manualOverride: true;
+      externalStatus: true;
+      lastSyncedAt: true;
     };
   }): Promise<MatchWithOverride | null>;
   update(args: {
@@ -87,6 +89,19 @@ export class ResultRecalculationService {
     return this.prisma.match as unknown as ResultMatchModel;
   }
 
+  private readonly finalStatuses = new Set([
+    'FINISHED',
+    'AWARDED',
+    'CANCELLED',
+  ]);
+
+  private isFinalizedStatus(status: string | null | undefined): boolean {
+    if (!status) {
+      return false;
+    }
+    return this.finalStatuses.has(status.toUpperCase());
+  }
+
   async applyMatchResult(input: ApplyMatchResultInput) {
     const matchModel = this.getMatchModel();
     const existingMatch = await matchModel.findUnique({
@@ -104,12 +119,16 @@ export class ResultRecalculationService {
       throw new NotFoundException(`Match ${input.matchId} not found`);
     }
 
-    if (existingMatch.manualOverride && !input.bypassManualOverride) {
+    const syncedAt = input.syncedAt ?? new Date();
+    if (
+      existingMatch.lastSyncedAt &&
+      syncedAt.getTime() <= existingMatch.lastSyncedAt.getTime()
+    ) {
       return {
         matchId: input.matchId,
         recalculatedPredictions: 0,
         recalculatedUsers: 0,
-        skipped: 'manual_override',
+        skipped: 'stale_update',
       } as const;
     }
 
@@ -123,12 +142,9 @@ export class ResultRecalculationService {
         homeGoals: input.homeGoals,
         awayGoals: input.awayGoals,
         resultSource: input.source,
-        lastSyncedAt: new Date(),
+        lastSyncedAt: syncedAt,
         ...(input.externalStatus !== undefined
           ? { externalStatus: input.externalStatus ?? null }
-          : {}),
-        ...(input.setManualOverride !== undefined
-          ? { manualOverride: input.setManualOverride }
           : {}),
       },
       select: { id: true, phase: true, homeGoals: true, awayGoals: true },
@@ -171,13 +187,26 @@ export class ResultRecalculationService {
       } as const;
     }
 
-    if (match.manualOverride) {
+    if (this.isFinalizedStatus(match.externalStatus)) {
       return {
         matched: true,
         matchId: match.id,
         recalculatedPredictions: 0,
         recalculatedUsers: 0,
-        skipped: 'manual_override',
+        skipped: 'already_finalized',
+      } as const;
+    }
+
+    if (
+      match.lastSyncedAt &&
+      input.syncedAt.getTime() <= match.lastSyncedAt.getTime()
+    ) {
+      return {
+        matched: true,
+        matchId: match.id,
+        recalculatedPredictions: 0,
+        recalculatedUsers: 0,
+        skipped: 'stale_update',
       } as const;
     }
 
@@ -232,7 +261,10 @@ export class ResultRecalculationService {
 
     await matchModel.update({
       where: { id: matchId },
-      data: { manualOverride: false },
+      data: {
+        manualOverride: false,
+        externalStatus: null,
+      },
     });
 
     return { matchId };
