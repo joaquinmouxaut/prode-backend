@@ -45,6 +45,30 @@ describe('FixtureSyncService', () => {
     expect(status.lastPollResult).toBe('missing_api_key');
   });
 
+  it('returns missing_api_key when import is called without API token', async () => {
+    const deps = createFixtureSyncDeps();
+    deps.apiFootballClient.isConfigured.mockReturnValue(false);
+
+    const service = new FixtureSyncService(
+      deps.prisma as never,
+      deps.apiFootballClient as never,
+      deps.recalcService as never,
+    );
+
+    const result = await service.importFixture();
+
+    expect(result).toEqual({
+      importedMatches: 0,
+      createdMatches: 0,
+      updatedMatches: 0,
+      skippedUnknownPhase: 0,
+      skippedManualOverride: 0,
+      discoveredTeams: 0,
+      error: 'missing_api_key',
+    });
+    expect(deps.apiFootballClient.fetchWorldCupFixtures).not.toHaveBeenCalled();
+  });
+
   it('skips scheduled sync when there are no active matches', async () => {
     const deps = createFixtureSyncDeps();
     deps.apiFootballClient.isConfigured.mockReturnValue(true);

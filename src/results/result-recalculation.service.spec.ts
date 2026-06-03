@@ -22,6 +22,40 @@ function createPrismaMock() {
 }
 
 describe('ResultRecalculationService', () => {
+  it('skips API updates when match has manual override', async () => {
+    const prisma = createPrismaMock();
+    prisma.match.findUnique.mockResolvedValue({
+      id: 10,
+      phase: Phase.GROUPS_1,
+      homeGoals: 1,
+      awayGoals: 0,
+      manualOverride: true,
+      externalStatus: 'IN_PLAY',
+      lastSyncedAt: new Date('2026-06-20T10:00:00.000Z'),
+    });
+
+    const service = new ResultRecalculationService(
+      prisma as never,
+      new PointsService(),
+    );
+    const result = await service.applyExternalResult({
+      externalId: 'ext-10',
+      homeGoals: 2,
+      awayGoals: 1,
+      externalStatus: 'FINISHED',
+      syncedAt: new Date(),
+    });
+
+    expect(result).toEqual({
+      matched: true,
+      matchId: 10,
+      recalculatedPredictions: 0,
+      recalculatedUsers: 0,
+      skipped: 'manual_override',
+    });
+    expect(prisma.match.update).not.toHaveBeenCalled();
+  });
+
   it('skips API updates when match is already finalized', async () => {
     const prisma = createPrismaMock();
     prisma.match.findUnique.mockResolvedValue({
@@ -29,6 +63,7 @@ describe('ResultRecalculationService', () => {
       phase: Phase.GROUPS_1,
       homeGoals: 1,
       awayGoals: 1,
+      manualOverride: false,
       externalStatus: 'FINISHED',
       lastSyncedAt: new Date('2026-06-20T10:00:00.000Z'),
     });
@@ -62,6 +97,7 @@ describe('ResultRecalculationService', () => {
       phase: Phase.GROUPS_1,
       homeGoals: 1,
       awayGoals: 1,
+      manualOverride: false,
       externalStatus: '1H',
       lastSyncedAt: new Date('2026-06-20T12:00:00.000Z'),
     });
@@ -95,7 +131,6 @@ describe('ResultRecalculationService', () => {
       phase: Phase.GROUPS_1,
       homeGoals: 0,
       awayGoals: 0,
-      externalStatus: 'IN_PLAY',
       lastSyncedAt: new Date('2026-06-20T09:00:00.000Z'),
     });
     prisma.match.update.mockResolvedValue({

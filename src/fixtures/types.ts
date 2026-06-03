@@ -19,6 +19,7 @@ export type FixtureImportResult = {
   skippedUnknownPhase: number;
   skippedManualOverride: number;
   discoveredTeams: number;
+  error?: 'missing_api_key';
 };
 
 export type PollingStatus = {

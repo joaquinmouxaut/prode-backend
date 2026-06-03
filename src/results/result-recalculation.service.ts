@@ -22,72 +22,12 @@ type ApplyExternalResultInput = {
 
 type MatchResultSource = 'ADMIN' | 'API' | 'IMPORT';
 
-type MatchWithOverride = {
-  id: number;
-  phase: Phase;
-  homeGoals: number | null;
-  awayGoals: number | null;
-  externalStatus: string | null;
-  lastSyncedAt: Date | null;
-};
-
-type MatchIdOnly = { id: number };
-
-type UpdatedMatchScore = {
-  id: number;
-  phase: Phase;
-  homeGoals: number | null;
-  awayGoals: number | null;
-};
-
-interface ResultMatchModel {
-  findUnique(args: {
-    where: { id: number };
-    select: {
-      id: true;
-      phase: true;
-      homeGoals: true;
-      awayGoals: true;
-      externalStatus: true;
-      lastSyncedAt: true;
-    };
-  }): Promise<MatchWithOverride | null>;
-  findUnique(args: {
-    where: { id: number };
-    select: { id: true };
-  }): Promise<MatchIdOnly | null>;
-  findUnique(args: {
-    where: { externalId: string };
-    select: {
-      id: true;
-      phase: true;
-      homeGoals: true;
-      awayGoals: true;
-      externalStatus: true;
-      lastSyncedAt: true;
-    };
-  }): Promise<MatchWithOverride | null>;
-  update(args: {
-    where: { id: number };
-    data: Record<string, unknown>;
-    select: { id: true; phase: true; homeGoals: true; awayGoals: true };
-  }): Promise<UpdatedMatchScore>;
-  update(args: {
-    where: { id: number };
-    data: Record<string, unknown>;
-  }): Promise<unknown>;
-}
-
 @Injectable()
 export class ResultRecalculationService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly pointsService: PointsService,
   ) {}
-
-  private getMatchModel(): ResultMatchModel {
-    return this.prisma.match as unknown as ResultMatchModel;
-  }
 
   private readonly finalStatuses = new Set([
     'FINISHED',
@@ -103,15 +43,14 @@ export class ResultRecalculationService {
   }
 
   async applyMatchResult(input: ApplyMatchResultInput) {
-    const matchModel = this.getMatchModel();
-    const existingMatch = await matchModel.findUnique({
+    const existingMatch = await this.prisma.match.findUnique({
       where: { id: input.matchId },
       select: {
         id: true,
         phase: true,
         homeGoals: true,
         awayGoals: true,
-        manualOverride: true,
+        lastSyncedAt: true,
       },
     });
 
@@ -136,13 +75,14 @@ export class ResultRecalculationService {
       existingMatch.homeGoals !== input.homeGoals ||
       existingMatch.awayGoals !== input.awayGoals;
 
-    const match = await matchModel.update({
+    const match = await this.prisma.match.update({
       where: { id: input.matchId },
       data: {
         homeGoals: input.homeGoals,
         awayGoals: input.awayGoals,
         resultSource: input.source,
         lastSyncedAt: syncedAt,
+        ...(input.source === 'ADMIN' ? { manualOverride: true } : {}),
         ...(input.externalStatus !== undefined
           ? { externalStatus: input.externalStatus ?? null }
           : {}),
@@ -168,8 +108,7 @@ export class ResultRecalculationService {
   }
 
   async applyExternalResult(input: ApplyExternalResultInput) {
-    const matchModel = this.getMatchModel();
-    const match = await matchModel.findUnique({
+    const match = await this.prisma.match.findUnique({
       where: { externalId: input.externalId },
       select: {
         id: true,
@@ -177,6 +116,8 @@ export class ResultRecalculationService {
         homeGoals: true,
         awayGoals: true,
         manualOverride: true,
+        externalStatus: true,
+        lastSyncedAt: true,
       },
     });
 
@@ -184,6 +125,16 @@ export class ResultRecalculationService {
       return {
         matched: false,
         reason: 'match_not_found',
+      } as const;
+    }
+
+    if (match.manualOverride) {
+      return {
+        matched: true,
+        matchId: match.id,
+        recalculatedPredictions: 0,
+        recalculatedUsers: 0,
+        skipped: 'manual_override',
       } as const;
     }
 
@@ -214,7 +165,7 @@ export class ResultRecalculationService {
       match.homeGoals !== input.homeGoals ||
       match.awayGoals !== input.awayGoals;
 
-    await matchModel.update({
+    await this.prisma.match.update({
       where: { id: match.id },
       data: {
         homeGoals: input.homeGoals,
@@ -250,8 +201,7 @@ export class ResultRecalculationService {
   }
 
   async clearManualOverride(matchId: number) {
-    const matchModel = this.getMatchModel();
-    const match = await matchModel.findUnique({
+    const match = await this.prisma.match.findUnique({
       where: { id: matchId },
       select: { id: true },
     });
@@ -259,7 +209,7 @@ export class ResultRecalculationService {
       throw new NotFoundException(`Match ${matchId} not found`);
     }
 
-    await matchModel.update({
+    await this.prisma.match.update({
       where: { id: matchId },
       data: {
         manualOverride: false,

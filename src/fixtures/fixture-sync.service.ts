@@ -119,6 +119,18 @@ export class FixtureSyncService implements OnModuleInit, OnModuleDestroy {
   }
 
   async importFixture(): Promise<FixtureImportResult> {
+    if (!this.apiFootballClient.isConfigured()) {
+      return {
+        importedMatches: 0,
+        createdMatches: 0,
+        updatedMatches: 0,
+        skippedUnknownPhase: 0,
+        skippedManualOverride: 0,
+        discoveredTeams: 0,
+        error: 'missing_api_key',
+      };
+    }
+
     const matchModel = this.getMatchModel();
     const fixtures = await this.apiFootballClient.fetchWorldCupFixtures();
     const teamNames = new Set<string>();
