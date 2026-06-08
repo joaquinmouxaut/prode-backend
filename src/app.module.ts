@@ -6,14 +6,16 @@ import { MatchesModule } from './matches/matches.module';
 import { PointsModule } from './points/points.module';
 import { PredictionsModule } from './predictions/predictions.module';
 import { PrismaModule } from './prisma/prisma.module';
+import { TournamentModule } from './tournament/tournament.module';
 import { UsersModule } from './users/users.module';
 
 @Module({
   imports: [
     PrismaModule,
     PointsModule,
-    UsersModule,
     MatchesModule,
+    TournamentModule,
+    UsersModule,
     PredictionsModule,
     LeaderboardModule,
     AdminModule,

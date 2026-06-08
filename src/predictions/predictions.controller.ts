@@ -9,6 +9,10 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
+import {
+  CurrentUser,
+  type CurrentUserData,
+} from '../auth/decorators/current-user.decorator';
 import { CreatePredictionDto } from './dto/create-prediction.dto';
 import { UpdatePredictionDto } from './dto/update-prediction.dto';
 import { PredictionsService } from './predictions.service';
@@ -24,10 +28,11 @@ export class PredictionsController {
 
   @Get()
   findAll(
+    @CurrentUser() user: CurrentUserData,
     @Query('userId', new ParseIntPipe({ optional: true })) userId?: number,
     @Query('matchId', new ParseIntPipe({ optional: true })) matchId?: number,
   ) {
-    return this.predictionsService.findAll({ userId, matchId });
+    return this.predictionsService.findVisible(user.id, { userId, matchId });
   }
 
   @Get(':id')

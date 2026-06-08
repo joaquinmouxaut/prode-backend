@@ -1,15 +1,105 @@
 import {
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { isMatchStarted } from '../matches/match-lifecycle';
+import { MatchLifecycleService } from '../matches/match-lifecycle.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreatePredictionDto } from './dto/create-prediction.dto';
 import { UpdatePredictionDto } from './dto/update-prediction.dto';
 
+const predictionInclude = {
+  user: { select: { id: true, name: true, email: true } },
+  match: {
+    select: {
+      id: true,
+      homeTeam: true,
+      awayTeam: true,
+      homeGoals: true,
+      awayGoals: true,
+      date: true,
+      phase: true,
+      externalStatus: true,
+    },
+  },
+} as const;
+
 @Injectable()
 export class PredictionsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly matchLifecycle: MatchLifecycleService,
+  ) {}
+
+  async findVisible(
+    viewerUserId: number,
+    filters?: { userId?: number; matchId?: number },
+  ) {
+    if (filters?.matchId !== undefined) {
+      const match = await this.prisma.match.findUnique({
+        where: { id: filters.matchId },
+        select: {
+          id: true,
+          date: true,
+          externalStatus: true,
+        },
+      });
+      if (!match) {
+        throw new NotFoundException(`Match ${filters.matchId} not found`);
+      }
+
+      const started = isMatchStarted(match);
+      if (
+        filters.userId !== undefined &&
+        filters.userId !== viewerUserId &&
+        !started
+      ) {
+        throw new ForbiddenException(
+          'Predictions for other users are visible only after kickoff',
+        );
+      }
+
+      return this.prisma.prediction.findMany({
+        where: {
+          matchId: filters.matchId,
+          ...(filters.userId !== undefined ? { userId: filters.userId } : {}),
+          ...(started ? {} : { userId: viewerUserId }),
+        },
+        include: predictionInclude,
+        orderBy: [{ matchId: 'asc' }, { userId: 'asc' }],
+      });
+    }
+
+    if (filters?.userId !== undefined && filters.userId !== viewerUserId) {
+      throw new ForbiddenException(
+        'Use matchId to inspect other users after kickoff',
+      );
+    }
+
+    const matches = await this.prisma.match.findMany({
+      select: {
+        id: true,
+        date: true,
+        externalStatus: true,
+      },
+    });
+    const startedMatchIds = matches
+      .filter((match) => isMatchStarted(match))
+      .map((match) => match.id);
+
+    return this.prisma.prediction.findMany({
+      where: {
+        OR: [
+          { userId: viewerUserId },
+          { matchId: { in: startedMatchIds } },
+        ],
+      },
+      include: predictionInclude,
+      orderBy: [{ matchId: 'asc' }, { userId: 'asc' }],
+    });
+  }
 
   findAll(filters?: { userId?: number; matchId?: number }) {
     return this.prisma.prediction.findMany({
@@ -49,6 +139,7 @@ export class PredictionsService {
             awayGoals: true,
             date: true,
             phase: true,
+            externalStatus: true,
           },
         },
       },
@@ -61,7 +152,7 @@ export class PredictionsService {
 
   async create(dto: CreatePredictionDto) {
     await this.ensureUserExists(dto.userId);
-    await this.ensureMatchExists(dto.matchId);
+    await this.matchLifecycle.ensureMatchOpenForPredictions(dto.matchId);
     try {
       return await this.prisma.prediction.create({
         data: {
@@ -96,7 +187,8 @@ export class PredictionsService {
   }
 
   async update(id: number, dto: UpdatePredictionDto) {
-    await this.findOne(id);
+    const prediction = await this.findOne(id);
+    await this.matchLifecycle.ensureMatchOpenForPredictions(prediction.matchId);
     return this.prisma.prediction.update({
       where: { id },
       data: dto,
@@ -118,7 +210,8 @@ export class PredictionsService {
   }
 
   async remove(id: number) {
-    await this.findOne(id);
+    const prediction = await this.findOne(id);
+    await this.matchLifecycle.ensureMatchOpenForPredictions(prediction.matchId);
     return this.prisma.prediction.delete({ where: { id } });
   }
 
@@ -129,16 +222,6 @@ export class PredictionsService {
     });
     if (!user) {
       throw new NotFoundException(`User ${id} not found`);
-    }
-  }
-
-  private async ensureMatchExists(id: number) {
-    const match = await this.prisma.match.findUnique({
-      where: { id },
-      select: { id: true },
-    });
-    if (!match) {
-      throw new NotFoundException(`Match ${id} not found`);
     }
   }
 

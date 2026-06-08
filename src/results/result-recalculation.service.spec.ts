@@ -1,5 +1,6 @@
 import { Phase } from '@prisma/client';
 import { PointsService } from '../points/points.service';
+import { UserTotalsService } from '../tournament/user-totals.service';
 import { ResultRecalculationService } from './result-recalculation.service';
 
 function createPrismaMock() {
@@ -12,48 +13,58 @@ function createPrismaMock() {
       findMany: jest.fn(),
       update: jest.fn(),
     },
-    user: {
-      update: jest.fn(),
-    },
     $transaction: jest.fn(async (ops: unknown[]) =>
       Promise.all(ops as Promise<unknown>[]),
     ),
   };
 }
 
+function createUserTotalsMock() {
+  return {
+    recomputeForUsers: jest.fn().mockResolvedValue([]),
+  };
+}
+
+function createService(prisma = createPrismaMock()) {
+  return new ResultRecalculationService(
+    prisma as never,
+    new PointsService(),
+    createUserTotalsMock() as never,
+  );
+}
+
 describe('ResultRecalculationService', () => {
-  it('skips API updates when match has manual override', async () => {
+  it('continues API updates after a manual admin sync during the active window', async () => {
     const prisma = createPrismaMock();
     prisma.match.findUnique.mockResolvedValue({
       id: 10,
       phase: Phase.GROUPS_1,
+      date: new Date('2026-06-20T18:00:00.000Z'),
       homeGoals: 1,
       awayGoals: 0,
       manualOverride: true,
       externalStatus: 'IN_PLAY',
       lastSyncedAt: new Date('2026-06-20T10:00:00.000Z'),
     });
+    prisma.match.update.mockResolvedValue({});
+    prisma.prediction.findMany.mockResolvedValue([]);
 
-    const service = new ResultRecalculationService(
-      prisma as never,
-      new PointsService(),
-    );
+    const service = createService(prisma);
     const result = await service.applyExternalResult({
       externalId: 'ext-10',
       homeGoals: 2,
       awayGoals: 1,
-      externalStatus: 'FINISHED',
-      syncedAt: new Date(),
+      externalStatus: 'IN_PLAY',
+      syncedAt: new Date('2026-06-20T18:30:00.000Z'),
     });
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       matched: true,
       matchId: 10,
       recalculatedPredictions: 0,
       recalculatedUsers: 0,
-      skipped: 'manual_override',
     });
-    expect(prisma.match.update).not.toHaveBeenCalled();
+    expect(prisma.match.update).toHaveBeenCalled();
   });
 
   it('skips API updates when match is already finalized', async () => {
@@ -68,10 +79,7 @@ describe('ResultRecalculationService', () => {
       lastSyncedAt: new Date('2026-06-20T10:00:00.000Z'),
     });
 
-    const service = new ResultRecalculationService(
-      prisma as never,
-      new PointsService(),
-    );
+    const service = createService(prisma);
     const result = await service.applyExternalResult({
       externalId: 'ext-10',
       homeGoals: 2,
@@ -102,10 +110,7 @@ describe('ResultRecalculationService', () => {
       lastSyncedAt: new Date('2026-06-20T12:00:00.000Z'),
     });
 
-    const service = new ResultRecalculationService(
-      prisma as never,
-      new PointsService(),
-    );
+    const service = createService(prisma);
     const result = await service.applyExternalResult({
       externalId: 'ext-10',
       homeGoals: 2,
@@ -129,6 +134,8 @@ describe('ResultRecalculationService', () => {
     prisma.match.findUnique.mockResolvedValue({
       id: 11,
       phase: Phase.GROUPS_1,
+      date: new Date('2026-06-20T18:00:00.000Z'),
+      externalStatus: 'IN_PLAY',
       homeGoals: 0,
       awayGoals: 0,
       lastSyncedAt: new Date('2026-06-20T09:00:00.000Z'),
@@ -136,24 +143,22 @@ describe('ResultRecalculationService', () => {
     prisma.match.update.mockResolvedValue({
       id: 11,
       phase: Phase.GROUPS_1,
+      date: new Date('2026-06-20T18:00:00.000Z'),
+      externalStatus: 'IN_PLAY',
       homeGoals: 2,
       awayGoals: 1,
     });
-    prisma.prediction.findMany
-      .mockResolvedValueOnce([
-        { id: 100, userId: 1, homeGoals: 2, awayGoals: 1 },
-        { id: 101, userId: 2, homeGoals: 1, awayGoals: 1 },
-      ])
-      .mockResolvedValueOnce([
-        { userId: 1, points: 12, match: { phase: Phase.GROUPS_1 } },
-        { userId: 2, points: 4, match: { phase: Phase.GROUPS_1 } },
-      ]);
+    prisma.prediction.findMany.mockResolvedValueOnce([
+      { id: 100, userId: 1, homeGoals: 2, awayGoals: 1 },
+      { id: 101, userId: 2, homeGoals: 3, awayGoals: 0 },
+    ]);
     prisma.prediction.update.mockResolvedValue({});
-    prisma.user.update.mockResolvedValue({});
 
+    const userTotals = createUserTotalsMock();
     const service = new ResultRecalculationService(
       prisma as never,
       new PointsService(),
+      userTotals as never,
     );
     const result = await service.applyMatchResult({
       matchId: 11,
@@ -169,8 +174,8 @@ describe('ResultRecalculationService', () => {
       recalculatedPredictions: 2,
       recalculatedUsers: 2,
     });
-    expect(prisma.prediction.findMany).toHaveBeenCalledTimes(2);
+    expect(prisma.prediction.findMany).toHaveBeenCalledTimes(1);
     expect(prisma.prediction.update).toHaveBeenCalledTimes(2);
-    expect(prisma.user.update).toHaveBeenCalledTimes(2);
+    expect(userTotals.recomputeForUsers).toHaveBeenCalledWith([1, 2]);
   });
 });

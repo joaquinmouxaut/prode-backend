@@ -13,6 +13,7 @@ import { AdminService } from './admin.service';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { SetMatchResultDto } from './dto/set-match-result.dto';
+import { SetTournamentResultsDto } from './dto/set-tournament-results.dto';
 
 @Controller('admin')
 export class AdminController {
@@ -58,5 +59,19 @@ export class AdminController {
   @Roles(Role.ADMIN)
   runSyncNow() {
     return this.adminService.runSyncNow();
+  }
+
+  @Get('tournament/results')
+  @UseGuards(RolesGuard)
+  @Roles(Role.ADMIN)
+  getTournamentResults() {
+    return this.adminService.getTournamentResults();
+  }
+
+  @Patch('tournament/results')
+  @UseGuards(RolesGuard)
+  @Roles(Role.ADMIN)
+  setTournamentResults(@Body() body: SetTournamentResultsDto) {
+    return this.adminService.setTournamentResults(body);
   }
 }

@@ -5,13 +5,19 @@ import {
 } from '@nestjs/common';
 import { Role } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
+import { MatchLifecycleService } from '../matches/match-lifecycle.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { UserTotalsService } from '../tournament/user-totals.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 
 @Injectable()
 export class UsersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly userTotals: UserTotalsService,
+    private readonly matchLifecycle: MatchLifecycleService,
+  ) {}
 
   private readonly safeUserSelect = {
     id: true,
@@ -67,12 +73,18 @@ export class UsersService {
 
   async update(id: number, dto: UpdateUserDto) {
     await this.findOne(id);
+    if (dto.championPick !== undefined || dto.topScorerPick !== undefined) {
+      await this.matchLifecycle.ensureTournamentPicksOpen();
+    }
     try {
-      return await this.prisma.user.update({
+      await this.prisma.user.update({
         where: { id },
         data: dto,
-        select: this.safeUserSelect,
       });
+      if (dto.championPick !== undefined || dto.topScorerPick !== undefined) {
+        await this.userTotals.recomputeForUser(id);
+      }
+      return this.findOne(id);
     } catch (e: unknown) {
       if (this.isUniqueConstraint(e)) {
         throw new ConflictException('Email already in use');

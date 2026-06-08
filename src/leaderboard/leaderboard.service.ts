@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { Phase } from '@prisma/client';
+import { Phase, Role } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
 export type LeaderboardRow = {
@@ -11,6 +11,9 @@ export type LeaderboardRow = {
     topScorerPick: string | null;
   };
   total: number;
+  matchPoints: number;
+  championPoints: number;
+  topScorerPoints: number;
   groupsPoints: number;
   knockoutPoints: number;
   byPhase: Partial<Record<Phase, number>>;
@@ -22,6 +25,7 @@ export class LeaderboardService {
 
   async findAll(): Promise<LeaderboardRow[]> {
     const users = await this.prisma.user.findMany({
+      where: { role: Role.USER },
       select: {
         id: true,
         name: true,
@@ -29,6 +33,8 @@ export class LeaderboardService {
         championPick: true,
         topScorerPick: true,
         totalPoints: true,
+        championPoints: true,
+        topScorerPoints: true,
         groups1: true,
         groups2: true,
         groups3: true,
@@ -54,6 +60,9 @@ export class LeaderboardService {
         topScorerPick: user.topScorerPick,
       },
       total: user.totalPoints,
+      matchPoints: user.groups1 + user.groups2 + user.groups3 + user.knockout,
+      championPoints: user.championPoints,
+      topScorerPoints: user.topScorerPoints,
       groupsPoints: user.groups1 + user.groups2 + user.groups3,
       knockoutPoints: user.knockout,
       byPhase: {

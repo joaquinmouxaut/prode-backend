@@ -12,6 +12,15 @@ type PredictionScore = {
   awayGoals: number;
 };
 
+const OUTCOME_POINTS = 4;
+
+const BONUS = {
+  EXACT: 4,
+  GOAL_DIFF: 2,
+  SINGLE_TEAM: 1,
+  NONE: 0,
+} as const;
+
 const PHASE_MULTIPLIERS: Record<Phase, number> = {
   [Phase.GROUPS_1]: 1,
   [Phase.GROUPS_2]: 1,
@@ -38,32 +47,38 @@ export class PointsService {
     const predHome = prediction.homeGoals;
     const predAway = prediction.awayGoals;
 
-    let basePoints = 0;
-
     if (
-      this.getOutcome(predHome, predAway) ===
+      this.getOutcome(predHome, predAway) !==
       this.getOutcome(realHome, realAway)
     ) {
-      basePoints += 4;
+      return 0;
     }
 
+    const bonus = this.getHighestBonus(predHome, predAway, realHome, realAway);
+    return (OUTCOME_POINTS + bonus) * this.getPhaseMultiplier(match.phase);
+  }
+
+  private getHighestBonus(
+    predHome: number,
+    predAway: number,
+    realHome: number,
+    realAway: number,
+  ): number {
     if (predHome === realHome && predAway === realAway) {
-      basePoints += 4;
+      return BONUS.EXACT;
     }
 
     if (predHome - predAway === realHome - realAway) {
-      basePoints += 2;
+      return BONUS.GOAL_DIFF;
     }
 
-    if (predHome === realHome) {
-      basePoints += 1;
+    const homeMatch = predHome === realHome;
+    const awayMatch = predAway === realAway;
+    if (homeMatch !== awayMatch) {
+      return BONUS.SINGLE_TEAM;
     }
 
-    if (predAway === realAway) {
-      basePoints += 1;
-    }
-
-    return basePoints * this.getPhaseMultiplier(match.phase);
+    return BONUS.NONE;
   }
 
   private getOutcome(homeGoals: number, awayGoals: number): 'H' | 'D' | 'A' {

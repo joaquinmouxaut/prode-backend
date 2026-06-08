@@ -1,12 +1,14 @@
 import { Injectable } from '@nestjs/common';
 import { FixtureSyncService } from '../fixtures/fixture-sync.service';
 import { ResultRecalculationService } from '../results/result-recalculation.service';
+import { TournamentBonusService } from '../tournament/tournament-bonus.service';
 
 @Injectable()
 export class AdminService {
   constructor(
     private readonly recalcService: ResultRecalculationService,
     private readonly fixtureSyncService: FixtureSyncService,
+    private readonly tournamentBonusService: TournamentBonusService,
   ) {}
 
   async setMatchResultAndRecalculate(
@@ -37,5 +39,16 @@ export class AdminService {
 
   runSyncNow() {
     return this.fixtureSyncService.runManualSync();
+  }
+
+  getTournamentResults() {
+    return this.tournamentBonusService.getConfig();
+  }
+
+  setTournamentResults(input: {
+    championTeam?: string;
+    topScorerPlayer?: string;
+  }) {
+    return this.tournamentBonusService.setOfficialResults(input);
   }
 }

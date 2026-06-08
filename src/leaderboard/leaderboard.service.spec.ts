@@ -1,4 +1,4 @@
-import { Phase } from '@prisma/client';
+import { Phase, Role } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { LeaderboardService } from './leaderboard.service';
 
@@ -19,6 +19,7 @@ describe('LeaderboardService', () => {
     await service.findAll();
 
     expect(findMany).toHaveBeenCalledWith({
+      where: { role: Role.USER },
       select: {
         id: true,
         name: true,
@@ -26,6 +27,8 @@ describe('LeaderboardService', () => {
         championPick: true,
         topScorerPick: true,
         totalPoints: true,
+        championPoints: true,
+        topScorerPoints: true,
         groups1: true,
         groups2: true,
         groups3: true,
@@ -51,11 +54,13 @@ describe('LeaderboardService', () => {
         email: 'ana@example.com',
         championPick: 'Argentina',
         topScorerPick: null,
-        totalPoints: 42,
+        totalPoints: 74,
+        championPoints: 50,
+        topScorerPoints: 0,
         groups1: 8,
         groups2: 10,
         groups3: 6,
-        knockout: 18,
+        knockout: 0,
       },
     ]);
 
@@ -68,9 +73,12 @@ describe('LeaderboardService', () => {
           championPick: 'Argentina',
           topScorerPick: null,
         },
-        total: 42,
+        total: 74,
+        matchPoints: 24,
+        championPoints: 50,
+        topScorerPoints: 0,
         groupsPoints: 24,
-        knockoutPoints: 18,
+        knockoutPoints: 0,
         byPhase: {
           [Phase.GROUPS_1]: 8,
           [Phase.GROUPS_2]: 10,

@@ -1,7 +1,8 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { Phase } from '@prisma/client';
+import { hasScoreableResult, isMatchStarted } from '../matches/match-lifecycle';
 import { PointsService } from '../points/points.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { UserTotalsService } from '../tournament/user-totals.service';
 
 type ApplyMatchResultInput = {
   matchId: number;
@@ -27,6 +28,7 @@ export class ResultRecalculationService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly pointsService: PointsService,
+    private readonly userTotals: UserTotalsService,
   ) {}
 
   private readonly finalStatuses = new Set([
@@ -48,6 +50,8 @@ export class ResultRecalculationService {
       select: {
         id: true,
         phase: true,
+        date: true,
+        externalStatus: true,
         homeGoals: true,
         awayGoals: true,
         lastSyncedAt: true,
@@ -75,6 +79,8 @@ export class ResultRecalculationService {
       existingMatch.homeGoals !== input.homeGoals ||
       existingMatch.awayGoals !== input.awayGoals;
 
+    const wasScoreable = hasScoreableResult(existingMatch);
+
     const match = await this.prisma.match.update({
       where: { id: input.matchId },
       data: {
@@ -87,10 +93,28 @@ export class ResultRecalculationService {
           ? { externalStatus: input.externalStatus ?? null }
           : {}),
       },
-      select: { id: true, phase: true, homeGoals: true, awayGoals: true },
+      select: {
+        id: true,
+        phase: true,
+        date: true,
+        externalStatus: true,
+        homeGoals: true,
+        awayGoals: true,
+      },
     });
 
-    if (!hasScoreChange) {
+    const isScoreable = hasScoreableResult(match);
+
+    if (!isScoreable) {
+      return {
+        matchId: match.id,
+        recalculatedPredictions: 0,
+        recalculatedUsers: 0,
+        skipped: 'match_not_started',
+      } as const;
+    }
+
+    if (!hasScoreChange && !(isScoreable && !wasScoreable)) {
       return {
         matchId: match.id,
         recalculatedPredictions: 0,
@@ -113,6 +137,7 @@ export class ResultRecalculationService {
       select: {
         id: true,
         phase: true,
+        date: true,
         homeGoals: true,
         awayGoals: true,
         manualOverride: true,
@@ -125,16 +150,6 @@ export class ResultRecalculationService {
       return {
         matched: false,
         reason: 'match_not_found',
-      } as const;
-    }
-
-    if (match.manualOverride) {
-      return {
-        matched: true,
-        matchId: match.id,
-        recalculatedPredictions: 0,
-        recalculatedUsers: 0,
-        skipped: 'manual_override',
       } as const;
     }
 
@@ -161,6 +176,38 @@ export class ResultRecalculationService {
       } as const;
     }
 
+    const wasScoreable = hasScoreableResult({
+      date: match.date,
+      externalStatus: match.externalStatus,
+      homeGoals: match.homeGoals,
+      awayGoals: match.awayGoals,
+    });
+
+    const nextMatch = {
+      date: match.date,
+      externalStatus: input.externalStatus,
+      homeGoals: input.homeGoals,
+      awayGoals: input.awayGoals,
+    };
+
+    if (!isMatchStarted(nextMatch)) {
+      await this.prisma.match.update({
+        where: { id: match.id },
+        data: {
+          externalStatus: input.externalStatus,
+          lastSyncedAt: input.syncedAt,
+        },
+      });
+
+      return {
+        matched: true,
+        matchId: match.id,
+        recalculatedPredictions: 0,
+        recalculatedUsers: 0,
+        skipped: 'match_not_started',
+      } as const;
+    }
+
     const hasScoreChange =
       match.homeGoals !== input.homeGoals ||
       match.awayGoals !== input.awayGoals;
@@ -176,8 +223,10 @@ export class ResultRecalculationService {
       },
     });
 
+    const isScoreable = hasScoreableResult(nextMatch);
+
     if (
-      !hasScoreChange ||
+      !isScoreable ||
       input.homeGoals === null ||
       input.awayGoals === null
     ) {
@@ -186,7 +235,17 @@ export class ResultRecalculationService {
         matchId: match.id,
         recalculatedPredictions: 0,
         recalculatedUsers: 0,
-        skipped: hasScoreChange ? 'missing_score' : 'no_score_change',
+        skipped: isScoreable ? 'missing_score' : 'match_not_started',
+      } as const;
+    }
+
+    if (!hasScoreChange && !(isScoreable && !wasScoreable)) {
+      return {
+        matched: true,
+        matchId: match.id,
+        recalculatedPredictions: 0,
+        recalculatedUsers: 0,
+        skipped: 'no_score_change',
       } as const;
     }
 
@@ -260,65 +319,8 @@ export class ResultRecalculationService {
     const affectedUserIds = Array.from(
       new Set(predictions.map((prediction) => prediction.userId)),
     );
-    const predictionsByAffectedUsers = await this.prisma.prediction.findMany({
-      where: { userId: { in: affectedUserIds } },
-      select: {
-        userId: true,
-        points: true,
-        match: { select: { phase: true } },
-      },
-    });
 
-    const totalsByUser = new Map<
-      number,
-      {
-        totalPoints: number;
-        groups1: number;
-        groups2: number;
-        groups3: number;
-        knockout: number;
-      }
-    >();
-
-    for (const userId of affectedUserIds) {
-      totalsByUser.set(userId, {
-        totalPoints: 0,
-        groups1: 0,
-        groups2: 0,
-        groups3: 0,
-        knockout: 0,
-      });
-    }
-
-    for (const prediction of predictionsByAffectedUsers) {
-      const totals = totalsByUser.get(prediction.userId);
-      if (!totals) {
-        continue;
-      }
-      totals.totalPoints += prediction.points;
-      if (prediction.match.phase === Phase.GROUPS_1) {
-        totals.groups1 += prediction.points;
-      } else if (prediction.match.phase === Phase.GROUPS_2) {
-        totals.groups2 += prediction.points;
-      } else if (prediction.match.phase === Phase.GROUPS_3) {
-        totals.groups3 += prediction.points;
-      } else {
-        totals.knockout += prediction.points;
-      }
-    }
-
-    await this.prisma.$transaction(
-      affectedUserIds.map((userId) => {
-        const totals = totalsByUser.get(userId);
-        if (!totals) {
-          throw new Error(`Missing totals for user ${userId}`);
-        }
-        return this.prisma.user.update({
-          where: { id: userId },
-          data: totals,
-        });
-      }),
-    );
+    await this.userTotals.recomputeForUsers(affectedUserIds);
 
     return {
       matchId,
