@@ -113,7 +113,9 @@ export class UserTotalsService {
 
   async recomputeForUsers(userIds: number[]) {
     const uniqueUserIds = Array.from(new Set(userIds));
-    const results = [];
+    const results: NonNullable<
+      Awaited<ReturnType<UserTotalsService['recomputeForUser']>>
+    >[] = [];
 
     for (const userId of uniqueUserIds) {
       const result = await this.recomputeForUser(userId);
