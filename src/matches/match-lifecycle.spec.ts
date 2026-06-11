@@ -1,4 +1,9 @@
-import { hasScoreableResult, isMatchStarted } from './match-lifecycle';
+import {
+  hasScoreableResult,
+  isMatchFinished,
+  isMatchInProgress,
+  isMatchStarted,
+} from './match-lifecycle';
 
 describe('match-lifecycle', () => {
   const kickoff = new Date('2026-06-20T18:00:00.000Z');
@@ -56,6 +61,42 @@ describe('match-lifecycle', () => {
         },
         new Date('2026-06-20T18:05:00.000Z'),
       ),
+    ).toBe(true);
+  });
+
+  it('treats live matches as in progress', () => {
+    expect(
+      isMatchInProgress(
+        {
+          date: kickoff,
+          externalStatus: 'IN_PLAY',
+          homeGoals: 1,
+          awayGoals: 0,
+        },
+        new Date('2026-06-20T18:05:00.000Z'),
+      ),
+    ).toBe(true);
+  });
+
+  it('treats finished matches as not in progress', () => {
+    expect(
+      isMatchInProgress(
+        {
+          date: kickoff,
+          externalStatus: 'FINISHED',
+          homeGoals: 2,
+          awayGoals: 1,
+        },
+        new Date('2026-06-20T20:00:00.000Z'),
+      ),
+    ).toBe(false);
+    expect(
+      isMatchFinished({
+        date: kickoff,
+        externalStatus: 'FINISHED',
+        homeGoals: 2,
+        awayGoals: 1,
+      }),
     ).toBe(true);
   });
 });

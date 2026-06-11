@@ -1,16 +1,25 @@
 import { Phase, Role } from '@prisma/client';
+import { MatchLifecycleService } from '../matches/match-lifecycle.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { LeaderboardService } from './leaderboard.service';
 
 describe('LeaderboardService', () => {
   const findMany = jest.fn();
+  const hasTournamentStarted = jest.fn();
   let service: LeaderboardService;
 
   beforeEach(() => {
     findMany.mockReset();
-    service = new LeaderboardService({
-      user: { findMany },
-    } as unknown as PrismaService);
+    hasTournamentStarted.mockReset();
+    hasTournamentStarted.mockResolvedValue(true);
+    service = new LeaderboardService(
+      {
+        user: { findMany },
+      } as unknown as PrismaService,
+      {
+        hasTournamentStarted,
+      } as unknown as MatchLifecycleService,
+    );
   });
 
   it('reads users with the ranking order and tie-breakers', async () => {
@@ -64,27 +73,56 @@ describe('LeaderboardService', () => {
       },
     ]);
 
-    await expect(service.findAll()).resolves.toEqual([
+    await expect(service.findAll()).resolves.toEqual({
+      tournamentPicksVisible: true,
+      rows: [
+        {
+          user: {
+            id: 1,
+            name: 'Ana',
+            email: 'ana@example.com',
+            championPick: 'Argentina',
+            topScorerPick: null,
+          },
+          total: 74,
+          matchPoints: 24,
+          championPoints: 50,
+          topScorerPoints: 0,
+          groupsPoints: 24,
+          knockoutPoints: 0,
+          byPhase: {
+            [Phase.GROUPS_1]: 8,
+            [Phase.GROUPS_2]: 10,
+            [Phase.GROUPS_3]: 6,
+          },
+        },
+      ],
+    });
+  });
+
+  it('hides tournament picks before the first kickoff', async () => {
+    hasTournamentStarted.mockResolvedValue(false);
+    findMany.mockResolvedValue([
       {
-        user: {
-          id: 1,
-          name: 'Ana',
-          email: 'ana@example.com',
-          championPick: 'Argentina',
-          topScorerPick: null,
-        },
-        total: 74,
-        matchPoints: 24,
-        championPoints: 50,
+        id: 1,
+        name: 'Ana',
+        email: 'ana@example.com',
+        championPick: 'Argentina',
+        topScorerPick: 'Messi',
+        totalPoints: 0,
+        championPoints: 0,
         topScorerPoints: 0,
-        groupsPoints: 24,
-        knockoutPoints: 0,
-        byPhase: {
-          [Phase.GROUPS_1]: 8,
-          [Phase.GROUPS_2]: 10,
-          [Phase.GROUPS_3]: 6,
-        },
+        groups1: 0,
+        groups2: 0,
+        groups3: 0,
+        knockout: 0,
       },
     ]);
+
+    const result = await service.findAll();
+
+    expect(result.tournamentPicksVisible).toBe(false);
+    expect(result.rows[0].user.championPick).toBeNull();
+    expect(result.rows[0].user.topScorerPick).toBeNull();
   });
 });

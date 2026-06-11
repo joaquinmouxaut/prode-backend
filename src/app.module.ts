@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { AdminModule } from './admin/admin.module';
 import { AuthModule } from './auth/auth.module';
 import { LeaderboardModule } from './leaderboard/leaderboard.module';
+import { ParticipantsModule } from './participants/participants.module';
 import { MatchesModule } from './matches/matches.module';
 import { PointsModule } from './points/points.module';
 import { PredictionsModule } from './predictions/predictions.module';
@@ -18,6 +19,7 @@ import { UsersModule } from './users/users.module';
     UsersModule,
     PredictionsModule,
     LeaderboardModule,
+    ParticipantsModule,
     AdminModule,
     AuthModule,
   ],

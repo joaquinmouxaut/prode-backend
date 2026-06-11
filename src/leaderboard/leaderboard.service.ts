@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { Phase, Role } from '@prisma/client';
+import { MatchLifecycleService } from '../matches/match-lifecycle.service';
 import { PrismaService } from '../prisma/prisma.service';
 
 export type LeaderboardRow = {
@@ -19,11 +20,22 @@ export type LeaderboardRow = {
   byPhase: Partial<Record<Phase, number>>;
 };
 
+export type LeaderboardResponse = {
+  tournamentPicksVisible: boolean;
+  rows: LeaderboardRow[];
+};
+
 @Injectable()
 export class LeaderboardService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly matchLifecycle: MatchLifecycleService,
+  ) {}
 
-  async findAll(): Promise<LeaderboardRow[]> {
+  async findAll(): Promise<LeaderboardResponse> {
+    const tournamentPicksVisible =
+      await this.matchLifecycle.hasTournamentStarted();
+
     const users = await this.prisma.user.findMany({
       where: { role: Role.USER },
       select: {
@@ -51,25 +63,28 @@ export class LeaderboardService {
       ],
     });
 
-    return users.map((user) => ({
-      user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        championPick: user.championPick,
-        topScorerPick: user.topScorerPick,
-      },
-      total: user.totalPoints,
-      matchPoints: user.groups1 + user.groups2 + user.groups3 + user.knockout,
-      championPoints: user.championPoints,
-      topScorerPoints: user.topScorerPoints,
-      groupsPoints: user.groups1 + user.groups2 + user.groups3,
-      knockoutPoints: user.knockout,
-      byPhase: {
-        [Phase.GROUPS_1]: user.groups1,
-        [Phase.GROUPS_2]: user.groups2,
-        [Phase.GROUPS_3]: user.groups3,
-      },
-    }));
+    return {
+      tournamentPicksVisible,
+      rows: users.map((user) => ({
+        user: {
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          championPick: tournamentPicksVisible ? user.championPick : null,
+          topScorerPick: tournamentPicksVisible ? user.topScorerPick : null,
+        },
+        total: user.totalPoints,
+        matchPoints: user.groups1 + user.groups2 + user.groups3 + user.knockout,
+        championPoints: user.championPoints,
+        topScorerPoints: user.topScorerPoints,
+        groupsPoints: user.groups1 + user.groups2 + user.groups3,
+        knockoutPoints: user.knockout,
+        byPhase: {
+          [Phase.GROUPS_1]: user.groups1,
+          [Phase.GROUPS_2]: user.groups2,
+          [Phase.GROUPS_3]: user.groups3,
+        },
+      })),
+    };
   }
 }

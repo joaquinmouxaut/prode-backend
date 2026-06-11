@@ -1,4 +1,5 @@
 const LIVE_STATUSES = new Set(['IN_PLAY', 'PAUSED']);
+const FINAL_STATUSES = new Set(['FINISHED', 'AWARDED', 'CANCELLED']);
 const STARTED_STATUSES = new Set([
   'IN_PLAY',
   'PAUSED',
@@ -27,6 +28,31 @@ export function isMatchStarted(match: MatchLifecycleInput, now = new Date()): bo
   }
 
   return new Date(match.date).getTime() <= now.getTime();
+}
+
+export function isMatchFinished(match: MatchLifecycleInput): boolean {
+  const status = match.externalStatus?.toUpperCase();
+  if (status && FINAL_STATUSES.has(status)) {
+    return true;
+  }
+
+  return false;
+}
+
+export function isMatchInProgress(
+  match: MatchLifecycleInput,
+  now = new Date(),
+): boolean {
+  if (isMatchFinished(match)) {
+    return false;
+  }
+
+  const status = match.externalStatus?.toUpperCase();
+  if (status && LIVE_STATUSES.has(status)) {
+    return true;
+  }
+
+  return isMatchStarted(match, now);
 }
 
 export function hasScoreableResult(

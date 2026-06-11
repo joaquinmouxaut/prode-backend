@@ -7,5 +7,6 @@ import { PredictionsService } from './predictions.service';
   imports: [MatchesModule],
   controllers: [PredictionsController],
   providers: [PredictionsService],
+  exports: [PredictionsService],
 })
 export class PredictionsModule {}

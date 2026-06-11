@@ -73,9 +73,16 @@ export class PredictionsService {
     }
 
     if (filters?.userId !== undefined && filters.userId !== viewerUserId) {
-      throw new ForbiddenException(
-        'Use matchId to inspect other users after kickoff',
-      );
+      const startedMatchIds = await this.getStartedMatchIds();
+
+      return this.prisma.prediction.findMany({
+        where: {
+          userId: filters.userId,
+          matchId: { in: startedMatchIds },
+        },
+        include: predictionInclude,
+        orderBy: [{ match: { date: 'asc' } }, { matchId: 'asc' }],
+      });
     }
 
     const matches = await this.prisma.match.findMany({
@@ -213,6 +220,20 @@ export class PredictionsService {
     const prediction = await this.findOne(id);
     await this.matchLifecycle.ensureMatchOpenForPredictions(prediction.matchId);
     return this.prisma.prediction.delete({ where: { id } });
+  }
+
+  private async getStartedMatchIds(): Promise<number[]> {
+    const matches = await this.prisma.match.findMany({
+      select: {
+        id: true,
+        date: true,
+        externalStatus: true,
+      },
+    });
+
+    return matches
+      .filter((match) => isMatchStarted(match))
+      .map((match) => match.id);
   }
 
   private async ensureUserExists(id: number) {
