@@ -1,6 +1,14 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { Phase } from '@prisma/client';
-import { hasScoreableResult, isMatchStarted } from '../matches/match-lifecycle';
+import {
+  hasScoreableResult,
+  isMatchFinalized,
+  isMatchStarted,
+} from '../matches/match-lifecycle';
 import { PointsService } from '../points/points.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { UserTotalsService } from '../tournament/user-totals.service';
@@ -24,6 +32,17 @@ type ApplyExternalResultInput = {
 
 type MatchResultSource = 'ADMIN' | 'API' | 'IMPORT';
 
+const matchResultSelect = {
+  id: true,
+  phase: true,
+  date: true,
+  externalStatus: true,
+  homeGoals: true,
+  awayGoals: true,
+  lastSyncedAt: true,
+  finalizedAt: true,
+} as const;
+
 @Injectable()
 export class ResultRecalculationService {
   constructor(
@@ -32,35 +51,77 @@ export class ResultRecalculationService {
     private readonly userTotals: UserTotalsService,
   ) {}
 
-  private readonly finalStatuses = new Set([
-    'FINISHED',
-    'AWARDED',
-    'CANCELLED',
-  ]);
+  private resolveExternalStatus(
+    incoming: string,
+    existing: string | null | undefined,
+    kickoff: Date,
+    now = new Date(),
+  ): string {
+    const incomingStatus = incoming.toUpperCase();
+    const existingStatus = existing?.toUpperCase();
+    const preKickoffStatuses = new Set(['SCHEDULED', 'TIMED']);
+    const liveStatuses = new Set([
+      'IN_PLAY',
+      'PAUSED',
+      'EXTRA_TIME',
+      'PENALTY_SHOOTOUT',
+    ]);
 
-  private isFinalizedStatus(status: string | null | undefined): boolean {
-    if (!status) {
-      return false;
+    if (
+      existingStatus &&
+      liveStatuses.has(existingStatus) &&
+      preKickoffStatuses.has(incomingStatus)
+    ) {
+      return existingStatus;
     }
-    return this.finalStatuses.has(status.toUpperCase());
+
+    if (
+      preKickoffStatuses.has(incomingStatus) &&
+      kickoff.getTime() <= now.getTime() &&
+      existingStatus &&
+      liveStatuses.has(existingStatus)
+    ) {
+      return existingStatus;
+    }
+
+    return incomingStatus;
+  }
+
+  private resolveIncomingGoals(
+    input: { homeGoals: number | null; awayGoals: number | null },
+    existing: { homeGoals: number | null; awayGoals: number | null },
+  ) {
+    const hasCompleteScore =
+      input.homeGoals !== null && input.awayGoals !== null;
+
+    if (hasCompleteScore) {
+      return {
+        homeGoals: input.homeGoals,
+        awayGoals: input.awayGoals,
+        hasCompleteScore: true,
+      };
+    }
+
+    return {
+      homeGoals: existing.homeGoals,
+      awayGoals: existing.awayGoals,
+      hasCompleteScore:
+        existing.homeGoals !== null && existing.awayGoals !== null,
+    };
   }
 
   async applyMatchResult(input: ApplyMatchResultInput) {
     const existingMatch = await this.prisma.match.findUnique({
       where: { id: input.matchId },
-      select: {
-        id: true,
-        phase: true,
-        date: true,
-        externalStatus: true,
-        homeGoals: true,
-        awayGoals: true,
-        lastSyncedAt: true,
-      },
+      select: matchResultSelect,
     });
 
     if (!existingMatch) {
       throw new NotFoundException(`Match ${input.matchId} not found`);
+    }
+
+    if (isMatchFinalized(existingMatch)) {
+      throw new ConflictException('Match is finalized and cannot be updated');
     }
 
     const syncedAt = input.syncedAt ?? new Date();
@@ -89,19 +150,11 @@ export class ResultRecalculationService {
         awayGoals: input.awayGoals,
         resultSource: input.source,
         lastSyncedAt: syncedAt,
-        ...(input.source === 'ADMIN' ? { manualOverride: true } : {}),
         ...(input.externalStatus !== undefined
           ? { externalStatus: input.externalStatus ?? null }
           : {}),
       },
-      select: {
-        id: true,
-        phase: true,
-        date: true,
-        externalStatus: true,
-        homeGoals: true,
-        awayGoals: true,
-      },
+      select: matchResultSelect,
     });
 
     const isScoreable = hasScoreableResult(match);
@@ -135,16 +188,7 @@ export class ResultRecalculationService {
   async applyExternalResult(input: ApplyExternalResultInput) {
     const match = await this.prisma.match.findUnique({
       where: { externalId: input.externalId },
-      select: {
-        id: true,
-        phase: true,
-        date: true,
-        homeGoals: true,
-        awayGoals: true,
-        manualOverride: true,
-        externalStatus: true,
-        lastSyncedAt: true,
-      },
+      select: matchResultSelect,
     });
 
     if (!match) {
@@ -154,13 +198,13 @@ export class ResultRecalculationService {
       } as const;
     }
 
-    if (this.isFinalizedStatus(match.externalStatus)) {
+    if (isMatchFinalized(match)) {
       return {
         matched: true,
         matchId: match.id,
         recalculatedPredictions: 0,
         recalculatedUsers: 0,
-        skipped: 'already_finalized',
+        skipped: 'match_finalized',
       } as const;
     }
 
@@ -177,25 +221,38 @@ export class ResultRecalculationService {
       } as const;
     }
 
-    const wasScoreable = hasScoreableResult({
-      date: match.date,
-      externalStatus: match.externalStatus,
-      homeGoals: match.homeGoals,
-      awayGoals: match.awayGoals,
-    });
+    const wasScoreable = hasScoreableResult(match);
+
+    const externalStatus = this.resolveExternalStatus(
+      input.externalStatus,
+      match.externalStatus,
+      match.date,
+      input.syncedAt,
+    );
+    const resolvedGoals = this.resolveIncomingGoals(
+      {
+        homeGoals: input.homeGoals,
+        awayGoals: input.awayGoals,
+      },
+      {
+        homeGoals: match.homeGoals,
+        awayGoals: match.awayGoals,
+      },
+    );
 
     const nextMatch = {
       date: match.date,
-      externalStatus: input.externalStatus,
-      homeGoals: input.homeGoals,
-      awayGoals: input.awayGoals,
+      externalStatus,
+      homeGoals: resolvedGoals.homeGoals,
+      awayGoals: resolvedGoals.awayGoals,
+      finalizedAt: match.finalizedAt,
     };
 
     if (!isMatchStarted(nextMatch)) {
       await this.prisma.match.update({
         where: { id: match.id },
         data: {
-          externalStatus: input.externalStatus,
+          externalStatus,
           lastSyncedAt: input.syncedAt,
         },
       });
@@ -210,27 +267,35 @@ export class ResultRecalculationService {
     }
 
     const hasScoreChange =
-      match.homeGoals !== input.homeGoals ||
-      match.awayGoals !== input.awayGoals;
+      match.homeGoals !== resolvedGoals.homeGoals ||
+      match.awayGoals !== resolvedGoals.awayGoals ||
+      match.externalStatus !== externalStatus;
+
+    const updateData: {
+      externalStatus: string;
+      lastSyncedAt: Date;
+      resultSource: MatchResultSource;
+      homeGoals?: number | null;
+      awayGoals?: number | null;
+    } = {
+      externalStatus,
+      lastSyncedAt: input.syncedAt,
+      resultSource: 'API',
+    };
+
+    if (resolvedGoals.hasCompleteScore) {
+      updateData.homeGoals = resolvedGoals.homeGoals;
+      updateData.awayGoals = resolvedGoals.awayGoals;
+    }
 
     await this.prisma.match.update({
       where: { id: match.id },
-      data: {
-        homeGoals: input.homeGoals,
-        awayGoals: input.awayGoals,
-        externalStatus: input.externalStatus,
-        resultSource: 'API' as MatchResultSource,
-        lastSyncedAt: input.syncedAt,
-      },
+      data: updateData,
     });
 
     const isScoreable = hasScoreableResult(nextMatch);
 
-    if (
-      !isScoreable ||
-      input.homeGoals === null ||
-      input.awayGoals === null
-    ) {
+    if (!isScoreable || !resolvedGoals.hasCompleteScore) {
       return {
         matched: true,
         matchId: match.id,
@@ -253,27 +318,95 @@ export class ResultRecalculationService {
     const recalc = await this.recalculateForMatch(
       match.id,
       match.phase,
-      input.homeGoals,
-      input.awayGoals,
+      resolvedGoals.homeGoals,
+      resolvedGoals.awayGoals,
     );
 
     return { matched: true, ...recalc } as const;
   }
 
+  async finalizeMatch(matchId: number) {
+    const match = await this.prisma.match.findUnique({
+      where: { id: matchId },
+      select: matchResultSelect,
+    });
+
+    if (!match) {
+      throw new NotFoundException(`Match ${matchId} not found`);
+    }
+
+    if (isMatchFinalized(match)) {
+      throw new ConflictException('Match is already finalized');
+    }
+
+    if (!hasScoreableResult(match)) {
+      throw new ConflictException(
+        'Match needs a complete score before it can be finalized',
+      );
+    }
+
+    const finalizedAt = new Date();
+    await this.prisma.match.update({
+      where: { id: matchId },
+      data: {
+        finalizedAt,
+        externalStatus: 'FINISHED',
+      },
+    });
+
+    const recalc = await this.recalculateForMatch(
+      match.id,
+      match.phase,
+      match.homeGoals,
+      match.awayGoals,
+    );
+
+    return {
+      ...recalc,
+      finalizedAt: finalizedAt.toISOString(),
+    };
+  }
+
+  async unfinalizeMatch(matchId: number) {
+    const match = await this.prisma.match.findUnique({
+      where: { id: matchId },
+      select: matchResultSelect,
+    });
+
+    if (!match) {
+      throw new NotFoundException(`Match ${matchId} not found`);
+    }
+
+    if (!isMatchFinalized(match)) {
+      throw new ConflictException('Match is not finalized');
+    }
+
+    await this.prisma.match.update({
+      where: { id: matchId },
+      data: {
+        finalizedAt: null,
+      },
+    });
+
+    return { matchId };
+  }
+
   async clearManualOverride(matchId: number) {
     const match = await this.prisma.match.findUnique({
       where: { id: matchId },
-      select: { id: true },
+      select: { id: true, finalizedAt: true },
     });
     if (!match) {
       throw new NotFoundException(`Match ${matchId} not found`);
+    }
+    if (isMatchFinalized(match)) {
+      throw new ConflictException('Match is finalized and cannot be updated');
     }
 
     await this.prisma.match.update({
       where: { id: matchId },
       data: {
         manualOverride: false,
-        externalStatus: null,
       },
     });
 

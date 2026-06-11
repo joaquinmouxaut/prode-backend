@@ -19,12 +19,18 @@ type FootballDataMatchItem = {
       home?: number | null;
       away?: number | null;
     };
+    regularTime?: {
+      home?: number | null;
+      away?: number | null;
+    };
   };
 };
 
 type FootballDataApiResponse = {
   error?: string;
   message?: string;
+  errorCode?: number;
+  id?: number;
   matches?: FootballDataMatchItem[];
 };
 
@@ -74,6 +80,73 @@ export class ApiFootballClient {
     return this.toExternalFixtures({ ...data, matches: filtered });
   }
 
+  async fetchMatchByExternalId(
+    externalId: string,
+  ): Promise<ExternalFixture | null> {
+    const match = await this.requestMatch(`/matches/${externalId}`);
+    if (!match) {
+      return null;
+    }
+
+    return this.toExternalFixture(match);
+  }
+
+  private extractGoals(item: FootballDataMatchItem): {
+    homeGoals: number | null;
+    awayGoals: number | null;
+  } {
+    const fullTime = item.score?.fullTime;
+    if (fullTime?.home !== null && fullTime?.home !== undefined) {
+      if (fullTime?.away !== null && fullTime?.away !== undefined) {
+        return { homeGoals: fullTime.home, awayGoals: fullTime.away };
+      }
+    }
+
+    const regularTime = item.score?.regularTime;
+    if (
+      regularTime?.home !== null &&
+      regularTime?.home !== undefined &&
+      regularTime?.away !== null &&
+      regularTime?.away !== undefined
+    ) {
+      return { homeGoals: regularTime.home, awayGoals: regularTime.away };
+    }
+
+    return { homeGoals: null, awayGoals: null };
+  }
+
+  private toExternalFixture(item: FootballDataMatchItem): ExternalFixture | null {
+    const fixtureId = item.id;
+    const date = item.utcDate;
+    const homeTeam = item.homeTeam?.name;
+    const awayTeam = item.awayTeam?.name;
+    const stage = item.stage ?? '';
+    if (!fixtureId || !date || !homeTeam || !awayTeam) {
+      return null;
+    }
+
+    const { homeGoals, awayGoals } = this.extractGoals(item);
+
+    return {
+      externalId: String(fixtureId),
+      date,
+      homeTeam,
+      awayTeam,
+      homeGoals,
+      awayGoals,
+      externalStatus: item.status ?? 'UNKNOWN',
+      round: stage,
+      phase: mapExternalCompetitionStageToPhase(stage, item.matchday),
+    };
+  }
+
+  private toExternalFixtures(data: FootballDataApiResponse): ExternalFixture[] {
+    const fixtures = data.matches ?? [];
+    return fixtures
+      .map((item) => this.toExternalFixture(item))
+      .filter((fixture): fixture is ExternalFixture => fixture !== null);
+  }
+
   private async request(path: string): Promise<FootballDataApiResponse> {
     if (!this.apiKey) {
       throw new Error('Missing FOOTBALL_DATA_API_TOKEN env var');
@@ -96,7 +169,7 @@ export class ApiFootballClient {
     }
 
     const data = (await response.json()) as FootballDataApiResponse;
-    if (data.error || data.message) {
+    if (data.errorCode !== undefined || (data.message && !data.matches)) {
       const details = [data.error, data.message].filter(Boolean).join('; ');
       this.logger.error(`football-data returned errors: ${details}`);
       throw new Error(`football-data returned errors: ${details}`);
@@ -105,32 +178,13 @@ export class ApiFootballClient {
     return data;
   }
 
-  private toExternalFixtures(data: FootballDataApiResponse): ExternalFixture[] {
-    const fixtures = data.matches ?? [];
-    return fixtures
-      .map((item) => {
-        const fixtureId = item.id;
-        const date = item.utcDate;
-        const homeTeam = item.homeTeam?.name;
-        const awayTeam = item.awayTeam?.name;
-        const stage = item.stage ?? '';
-        if (!fixtureId || !date || !homeTeam || !awayTeam) {
-          return null;
-        }
+  private async requestMatch(path: string): Promise<FootballDataMatchItem | null> {
+    const data = await this.request(path);
+    if (data.id) {
+      return data as FootballDataMatchItem;
+    }
 
-        return {
-          externalId: String(fixtureId),
-          date,
-          homeTeam,
-          awayTeam,
-          homeGoals: item.score?.fullTime?.home ?? null,
-          awayGoals: item.score?.fullTime?.away ?? null,
-          externalStatus: item.status ?? 'UNKNOWN',
-          round: stage,
-          phase: mapExternalCompetitionStageToPhase(stage, item.matchday),
-        } satisfies ExternalFixture;
-      })
-      .filter((fixture): fixture is ExternalFixture => fixture !== null);
+    return null;
   }
 
   private matchesPath(): string {

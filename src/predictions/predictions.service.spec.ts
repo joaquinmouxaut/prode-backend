@@ -1,4 +1,5 @@
 import { ConflictException } from '@nestjs/common';
+import { Role } from '@prisma/client';
 import { MatchLifecycleService } from '../matches/match-lifecycle.service';
 import { PredictionsService } from './predictions.service';
 
@@ -68,5 +69,33 @@ describe('PredictionsService locks', () => {
       service.update(5, { homeGoals: 2, awayGoals: 1 }),
     ).rejects.toBeInstanceOf(ConflictException);
     expect(prisma.prediction.update).not.toHaveBeenCalled();
+  });
+
+  it('excludes admin users from visible group predictions after kickoff', async () => {
+    prisma.match.findMany.mockResolvedValue([
+      {
+        id: 1,
+        date: new Date('2026-06-11T19:00:00.000Z'),
+        externalStatus: 'IN_PLAY',
+      },
+    ]);
+    prisma.prediction.findMany.mockResolvedValue([]);
+
+    await service.findVisible(2);
+
+    expect(prisma.prediction.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          AND: [
+            {
+              OR: [{ userId: 2 }, { matchId: { in: [1] } }],
+            },
+            {
+              OR: [{ userId: 2 }, { user: { role: Role.USER } }],
+            },
+          ],
+        },
+      }),
+    );
   });
 });

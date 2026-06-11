@@ -1,5 +1,6 @@
 import {
   hasScoreableResult,
+  isMatchFinalized,
   isMatchFinished,
   isMatchInProgress,
   isMatchStarted,
@@ -78,7 +79,15 @@ describe('match-lifecycle', () => {
     ).toBe(true);
   });
 
-  it('treats finished matches as not in progress', () => {
+  it('treats API-finished matches without manual finalize as not finished', () => {
+    expect(
+      isMatchFinished({
+        date: kickoff,
+        externalStatus: 'FINISHED',
+        homeGoals: 2,
+        awayGoals: 1,
+      }),
+    ).toBe(false);
     expect(
       isMatchInProgress(
         {
@@ -90,13 +99,39 @@ describe('match-lifecycle', () => {
         new Date('2026-06-20T20:00:00.000Z'),
       ),
     ).toBe(false);
+  });
+
+  it('treats manually finalized matches as finished and not in progress', () => {
+    const finalizedAt = '2026-06-20T20:05:00.000Z';
+    expect(
+      isMatchFinalized({
+        date: kickoff,
+        externalStatus: 'FINISHED',
+        homeGoals: 2,
+        awayGoals: 1,
+        finalizedAt,
+      }),
+    ).toBe(true);
     expect(
       isMatchFinished({
         date: kickoff,
         externalStatus: 'FINISHED',
         homeGoals: 2,
         awayGoals: 1,
+        finalizedAt,
       }),
     ).toBe(true);
+    expect(
+      isMatchInProgress(
+        {
+          date: kickoff,
+          externalStatus: 'FINISHED',
+          homeGoals: 2,
+          awayGoals: 1,
+          finalizedAt,
+        },
+        new Date('2026-06-20T21:00:00.000Z'),
+      ),
+    ).toBe(false);
   });
 });

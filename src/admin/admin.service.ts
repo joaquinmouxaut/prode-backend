@@ -25,6 +25,14 @@ export class AdminService {
     });
   }
 
+  finalizeMatch(matchId: number) {
+    return this.recalcService.finalizeMatch(matchId);
+  }
+
+  unfinalizeMatch(matchId: number) {
+    return this.recalcService.unfinalizeMatch(matchId);
+  }
+
   clearManualOverride(matchId: number) {
     return this.recalcService.clearManualOverride(matchId);
   }

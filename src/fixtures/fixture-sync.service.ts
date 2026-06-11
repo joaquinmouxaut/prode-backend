@@ -16,10 +16,14 @@ const ACTIVE_WINDOW_MS = 6 * 60 * 60 * 1000;
 
 type ImportExistingMatch = {
   id: number;
+  finalizedAt: Date | null;
 };
 
 type ActiveCandidateMatch = {
+  externalId: string;
   externalStatus: string | null;
+  homeGoals: number | null;
+  awayGoals: number | null;
 };
 
 type MatchResultSource = 'ADMIN' | 'API' | 'IMPORT';
@@ -27,7 +31,7 @@ type MatchResultSource = 'ADMIN' | 'API' | 'IMPORT';
 interface FixtureMatchModel {
   findUnique(args: {
     where: { externalId: string };
-    select: { id: true };
+    select: { id: true; finalizedAt: true };
   }): Promise<ImportExistingMatch | null>;
   create(args: {
     data: {
@@ -62,8 +66,14 @@ interface FixtureMatchModel {
     where: {
       externalId: { not: null };
       date: { lte: Date; gte: Date };
+      finalizedAt: null;
     };
-    select: { externalStatus: true };
+    select: {
+      externalId: true;
+      externalStatus: true;
+      homeGoals: true;
+      awayGoals: true;
+    };
   }): Promise<ActiveCandidateMatch[]>;
 }
 
@@ -149,7 +159,7 @@ export class FixtureSyncService implements OnModuleInit, OnModuleDestroy {
 
       const existing = await matchModel.findUnique({
         where: { externalId: fixture.externalId },
-        select: { id: true },
+        select: { id: true, finalizedAt: true },
       });
 
       const baseData = {
@@ -173,6 +183,10 @@ export class FixtureSyncService implements OnModuleInit, OnModuleDestroy {
           },
         });
         createdMatches += 1;
+        continue;
+      }
+
+      if (existing.finalizedAt) {
         continue;
       }
 
@@ -243,8 +257,8 @@ export class FixtureSyncService implements OnModuleInit, OnModuleDestroy {
       return { trigger, skipped: 'waiting_next_window', syncedMatches: 0 };
     }
 
-    const activeMatches = await this.countPotentiallyActiveMatches();
-    if (activeMatches === 0) {
+    const activeMatches = await this.listPotentiallyActiveMatches();
+    if (activeMatches.length === 0) {
       this.lastPollResult = 'no_active_match_window';
       return { trigger, skipped: 'no_active_match_window', syncedMatches: 0 };
     }
@@ -253,13 +267,30 @@ export class FixtureSyncService implements OnModuleInit, OnModuleDestroy {
     this.lastPollAt = new Date();
 
     try {
-      const fixtures =
-        await this.apiFootballClient.fetchWorldCupActiveAndRecentlyFinishedFixtures();
       let syncedMatches = 0;
       let scoreChanges = 0;
       let skippedByFinalized = 0;
+      const details: Array<{
+        externalId: string;
+        matched: boolean;
+        skipped?: string;
+        apiStatus?: string;
+        apiScore?: string;
+      }> = [];
 
-      for (const fixture of fixtures) {
+      for (const candidate of activeMatches) {
+        const fixture = await this.apiFootballClient.fetchMatchByExternalId(
+          candidate.externalId,
+        );
+        if (!fixture) {
+          details.push({
+            externalId: candidate.externalId,
+            matched: false,
+            skipped: 'api_not_found',
+          });
+          continue;
+        }
+
         const sync = await this.recalcService.applyExternalResult({
           externalId: fixture.externalId,
           homeGoals: fixture.homeGoals,
@@ -268,12 +299,20 @@ export class FixtureSyncService implements OnModuleInit, OnModuleDestroy {
           syncedAt: this.lastPollAt,
         });
 
+        details.push({
+          externalId: fixture.externalId,
+          matched: sync.matched,
+          skipped: 'skipped' in sync ? sync.skipped : undefined,
+          apiStatus: fixture.externalStatus,
+          apiScore: `${fixture.homeGoals ?? '—'}:${fixture.awayGoals ?? '—'}`,
+        });
+
         if (!sync.matched) {
           continue;
         }
 
         syncedMatches += 1;
-        if ('skipped' in sync && sync.skipped === 'already_finalized') {
+        if ('skipped' in sync && sync.skipped === 'match_finalized') {
           skippedByFinalized += 1;
         }
         if (
@@ -284,8 +323,15 @@ export class FixtureSyncService implements OnModuleInit, OnModuleDestroy {
         }
       }
 
-      this.lastPollResult = `ok:synced=${syncedMatches},score_changes=${scoreChanges},finalized_skips=${skippedByFinalized}`;
-      return { trigger, syncedMatches, scoreChanges, skippedByFinalized };
+      this.lastPollResult = `ok:candidates=${activeMatches.length},synced=${syncedMatches},score_changes=${scoreChanges},finalized_skips=${skippedByFinalized}`;
+      return {
+        trigger,
+        candidates: activeMatches.length,
+        syncedMatches,
+        scoreChanges,
+        skippedByFinalized,
+        details,
+      };
     } catch (error) {
       this.lastPollResult = 'error';
       this.logger.error(
@@ -296,7 +342,7 @@ export class FixtureSyncService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private async countPotentiallyActiveMatches(): Promise<number> {
+  private async listPotentiallyActiveMatches(): Promise<ActiveCandidateMatch[]> {
     const now = new Date();
     const windowStart = new Date(now.getTime() - ACTIVE_WINDOW_MS);
     const matchModel = this.getMatchModel();
@@ -304,11 +350,20 @@ export class FixtureSyncService implements OnModuleInit, OnModuleDestroy {
       where: {
         externalId: { not: null },
         date: { lte: now, gte: windowStart },
+        finalizedAt: null,
       },
-      select: { externalStatus: true },
+      select: {
+        externalId: true,
+        externalStatus: true,
+        homeGoals: true,
+        awayGoals: true,
+      },
     });
 
     return candidates.filter((match: ActiveCandidateMatch) => {
+      if (match.homeGoals === null || match.awayGoals === null) {
+        return true;
+      }
       if (!match.externalStatus) {
         return true;
       }
@@ -316,7 +371,11 @@ export class FixtureSyncService implements OnModuleInit, OnModuleDestroy {
         return true;
       }
       return !FINAL_STATUSES.has(match.externalStatus);
-    }).length;
+    });
+  }
+
+  private async countPotentiallyActiveMatches(): Promise<number> {
+    return (await this.listPotentiallyActiveMatches()).length;
   }
 
   private rotateDayIfNeeded() {

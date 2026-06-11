@@ -64,6 +64,7 @@ model Match {
   resultSource  MatchResultSource?
   manualOverride Boolean          @default(false)
   lastSyncedAt  DateTime?
+  finalizedAt   DateTime?
   predictions   Prediction[]
 }
 

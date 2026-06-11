@@ -33,6 +33,20 @@ export class AdminController {
     );
   }
 
+  @Post('matches/:id/finalize')
+  @UseGuards(RolesGuard)
+  @Roles(Role.ADMIN)
+  finalizeMatch(@Param('id', ParseIntPipe) id: number) {
+    return this.adminService.finalizeMatch(id);
+  }
+
+  @Post('matches/:id/unfinalize')
+  @UseGuards(RolesGuard)
+  @Roles(Role.ADMIN)
+  unfinalizeMatch(@Param('id', ParseIntPipe) id: number) {
+    return this.adminService.unfinalizeMatch(id);
+  }
+
   @Post('matches/:id/unlock-sync')
   @UseGuards(RolesGuard)
   @Roles(Role.ADMIN)

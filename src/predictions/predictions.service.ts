@@ -4,6 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { Role } from '@prisma/client';
 import { isMatchStarted } from '../matches/match-lifecycle';
 import { MatchLifecycleService } from '../matches/match-lifecycle.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -64,8 +65,9 @@ export class PredictionsService {
       return this.prisma.prediction.findMany({
         where: {
           matchId: filters.matchId,
-          ...(filters.userId !== undefined ? { userId: filters.userId } : {}),
-          ...(started ? {} : { userId: viewerUserId }),
+          ...(started
+            ? this.buildVisibleUserWhere(viewerUserId, filters.userId)
+            : { userId: viewerUserId }),
         },
         include: predictionInclude,
         orderBy: [{ matchId: 'asc' }, { userId: 'asc' }],
@@ -78,6 +80,7 @@ export class PredictionsService {
       return this.prisma.prediction.findMany({
         where: {
           userId: filters.userId,
+          user: { role: Role.USER },
           matchId: { in: startedMatchIds },
         },
         include: predictionInclude,
@@ -98,14 +101,36 @@ export class PredictionsService {
 
     return this.prisma.prediction.findMany({
       where: {
-        OR: [
-          { userId: viewerUserId },
-          { matchId: { in: startedMatchIds } },
+        AND: [
+          {
+            OR: [
+              { userId: viewerUserId },
+              { matchId: { in: startedMatchIds } },
+            ],
+          },
+          this.buildVisibleUserWhere(viewerUserId),
         ],
       },
       include: predictionInclude,
       orderBy: [{ matchId: 'asc' }, { userId: 'asc' }],
     });
+  }
+
+  private buildVisibleUserWhere(
+    viewerUserId: number,
+    targetUserId?: number,
+  ): { userId: number } | { userId: number; user: { role: Role } } | { OR: Array<{ userId: number } | { user: { role: Role } }> } {
+    if (targetUserId !== undefined) {
+      if (targetUserId === viewerUserId) {
+        return { userId: targetUserId };
+      }
+
+      return { userId: targetUserId, user: { role: Role.USER } };
+    }
+
+    return {
+      OR: [{ userId: viewerUserId }, { user: { role: Role.USER } }],
+    };
   }
 
   findAll(filters?: { userId?: number; matchId?: number }) {

@@ -1,5 +1,4 @@
 const LIVE_STATUSES = new Set(['IN_PLAY', 'PAUSED']);
-const FINAL_STATUSES = new Set(['FINISHED', 'AWARDED', 'CANCELLED']);
 const STARTED_STATUSES = new Set([
   'IN_PLAY',
   'PAUSED',
@@ -10,11 +9,16 @@ const STARTED_STATUSES = new Set([
 ]);
 
 export type MatchLifecycleInput = {
-  date: Date | string;
+  date?: Date | string;
   externalStatus?: string | null;
   homeGoals?: number | null;
   awayGoals?: number | null;
+  finalizedAt?: Date | string | null;
 };
+
+export function isMatchFinalized(match: MatchLifecycleInput): boolean {
+  return match.finalizedAt != null;
+}
 
 export function isMatchStarted(match: MatchLifecycleInput, now = new Date()): boolean {
   const status = match.externalStatus?.toUpperCase();
@@ -23,33 +27,33 @@ export function isMatchStarted(match: MatchLifecycleInput, now = new Date()): bo
       return true;
     }
     if (status === 'TIMED' || status === 'SCHEDULED') {
-      return new Date(match.date).getTime() <= now.getTime();
+      return match.date != null && new Date(match.date).getTime() <= now.getTime();
     }
   }
 
-  return new Date(match.date).getTime() <= now.getTime();
+  return match.date != null && new Date(match.date).getTime() <= now.getTime();
 }
 
+/** Partido cerrado manualmente por admin: no admite más cambios de resultado. */
 export function isMatchFinished(match: MatchLifecycleInput): boolean {
-  const status = match.externalStatus?.toUpperCase();
-  if (status && FINAL_STATUSES.has(status)) {
-    return true;
-  }
-
-  return false;
+  return isMatchFinalized(match);
 }
 
 export function isMatchInProgress(
   match: MatchLifecycleInput,
   now = new Date(),
 ): boolean {
-  if (isMatchFinished(match)) {
+  if (isMatchFinalized(match)) {
     return false;
   }
 
   const status = match.externalStatus?.toUpperCase();
   if (status && LIVE_STATUSES.has(status)) {
     return true;
+  }
+
+  if (status === 'FINISHED' || status === 'AWARDED' || status === 'CANCELLED') {
+    return false;
   }
 
   return isMatchStarted(match, now);

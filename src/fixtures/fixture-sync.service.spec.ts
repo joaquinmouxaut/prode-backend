@@ -13,7 +13,7 @@ function createFixtureSyncDeps() {
     apiFootballClient: {
       isConfigured: jest.fn(),
       fetchWorldCupFixtures: jest.fn(),
-      fetchWorldCupActiveAndRecentlyFinishedFixtures: jest.fn(),
+      fetchMatchByExternalId: jest.fn(),
     },
     recalcService: {
       applyExternalResult: jest.fn(),
@@ -89,7 +89,66 @@ describe('FixtureSyncService', () => {
       syncedMatches: 0,
     });
     expect(
-      deps.apiFootballClient.fetchWorldCupActiveAndRecentlyFinishedFixtures,
+      deps.apiFootballClient.fetchMatchByExternalId,
     ).not.toHaveBeenCalled();
+  });
+
+  it('syncs active matches individually from football-data', async () => {
+    const deps = createFixtureSyncDeps();
+    deps.apiFootballClient.isConfigured.mockReturnValue(true);
+    deps.prisma.match.findMany.mockResolvedValue([
+      {
+        externalId: '537327',
+        externalStatus: 'IN_PLAY',
+        homeGoals: 1,
+        awayGoals: 0,
+      },
+    ]);
+    deps.apiFootballClient.fetchMatchByExternalId.mockResolvedValue({
+      externalId: '537327',
+      date: '2026-06-11T19:00:00Z',
+      homeTeam: 'Mexico',
+      awayTeam: 'South Africa',
+      homeGoals: 1,
+      awayGoals: 0,
+      externalStatus: 'IN_PLAY',
+      round: 'GROUP_STAGE',
+      phase: 'GROUPS_1',
+    });
+    deps.recalcService.applyExternalResult.mockResolvedValue({
+      matched: true,
+      matchId: 1,
+      recalculatedPredictions: 3,
+      recalculatedUsers: 3,
+    });
+    process.env.FIXTURE_POLL_ENABLED = 'true';
+
+    const service = new FixtureSyncService(
+      deps.prisma as never,
+      deps.apiFootballClient as never,
+      deps.recalcService as never,
+    );
+
+    const result = await service.runManualSync();
+
+    expect(result).toEqual({
+      trigger: 'manual',
+      candidates: 1,
+      syncedMatches: 1,
+      scoreChanges: 1,
+      skippedByFinalized: 0,
+      details: [
+        {
+          externalId: '537327',
+          matched: true,
+          skipped: undefined,
+          apiStatus: 'IN_PLAY',
+          apiScore: '1:0',
+        },
+      ],
+    });
+    expect(deps.apiFootballClient.fetchMatchByExternalId).toHaveBeenCalledWith(
+      '537327',
+    );
   });
 });
