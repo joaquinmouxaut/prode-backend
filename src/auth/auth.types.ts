@@ -5,6 +5,8 @@ export type AuthUser = {
   name: string;
   email: string;
   role: Role;
+  championPick: string | null;
+  topScorerPick: string | null;
 };
 
 export type JwtUserPayload = {

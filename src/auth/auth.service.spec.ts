@@ -41,6 +41,8 @@ describe('AuthService', () => {
       email: 'ana@example.com',
       passwordHash: 'hashed-password',
       role: Role.USER,
+      championPick: 'Argentina',
+      topScorerPick: 'Messi',
     });
     sign.mockReturnValue('signed-jwt');
 
@@ -56,6 +58,8 @@ describe('AuthService', () => {
         name: 'Ana',
         email: 'ana@example.com',
         role: Role.USER,
+        championPick: 'Argentina',
+        topScorerPick: 'Messi',
       },
       accessToken: 'signed-jwt',
     });
@@ -88,6 +92,8 @@ describe('AuthService', () => {
       email: 'beto@example.com',
       passwordHash: 'stored-hash',
       role: Role.ADMIN,
+      championPick: null,
+      topScorerPick: null,
     });
     (bcrypt.compare as jest.Mock).mockResolvedValue(true);
     sign.mockReturnValue('admin-token');
@@ -103,6 +109,8 @@ describe('AuthService', () => {
         name: 'Beto',
         email: 'beto@example.com',
         role: Role.ADMIN,
+        championPick: null,
+        topScorerPick: null,
       },
       accessToken: 'admin-token',
     });

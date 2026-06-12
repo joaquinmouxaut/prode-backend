@@ -80,12 +80,16 @@ export class AuthService {
     name: string;
     email: string;
     role: Role;
+    championPick?: string | null;
+    topScorerPick?: string | null;
   }): AuthUser {
     return {
       id: user.id,
       name: user.name,
       email: user.email,
       role: user.role,
+      championPick: user.championPick ?? null,
+      topScorerPick: user.topScorerPick ?? null,
     };
   }
 
