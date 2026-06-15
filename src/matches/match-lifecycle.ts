@@ -1,4 +1,5 @@
 const LIVE_STATUSES = new Set(['IN_PLAY', 'PAUSED']);
+const API_FINISHED_STATUSES = new Set(['FINISHED', 'AWARDED', 'CANCELLED']);
 const STARTED_STATUSES = new Set([
   'IN_PLAY',
   'PAUSED',
@@ -37,6 +38,12 @@ export function isMatchStarted(match: MatchLifecycleInput, now = new Date()): bo
 /** Partido cerrado manualmente por admin: no admite más cambios de resultado. */
 export function isMatchFinished(match: MatchLifecycleInput): boolean {
   return isMatchFinalized(match);
+}
+
+/** Partido finalizado según el estado reportado por la API externa. */
+export function isMatchApiFinished(match: MatchLifecycleInput): boolean {
+  const status = match.externalStatus?.toUpperCase();
+  return status != null && API_FINISHED_STATUSES.has(status);
 }
 
 export function isMatchInProgress(

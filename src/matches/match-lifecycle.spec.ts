@@ -1,5 +1,6 @@
 import {
   hasScoreableResult,
+  isMatchApiFinished,
   isMatchFinalized,
   isMatchFinished,
   isMatchInProgress,
@@ -80,13 +81,16 @@ describe('match-lifecycle', () => {
   });
 
   it('treats API-finished matches without manual finalize as not finished', () => {
+    const apiFinished = {
+      date: kickoff,
+      externalStatus: 'FINISHED',
+      homeGoals: 2,
+      awayGoals: 1,
+    };
+
+    expect(isMatchApiFinished(apiFinished)).toBe(true);
     expect(
-      isMatchFinished({
-        date: kickoff,
-        externalStatus: 'FINISHED',
-        homeGoals: 2,
-        awayGoals: 1,
-      }),
+      isMatchFinished(apiFinished),
     ).toBe(false);
     expect(
       isMatchInProgress(
