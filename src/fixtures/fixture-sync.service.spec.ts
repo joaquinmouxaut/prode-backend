@@ -61,6 +61,7 @@ describe('FixtureSyncService', () => {
       importedMatches: 0,
       createdMatches: 0,
       updatedMatches: 0,
+      backfilledGroupCodes: 0,
       skippedUnknownPhase: 0,
       skippedManualOverride: 0,
       discoveredTeams: 0,
@@ -150,5 +151,53 @@ describe('FixtureSyncService', () => {
     expect(deps.apiFootballClient.fetchMatchByExternalId).toHaveBeenCalledWith(
       '537327',
     );
+  });
+
+  it('backfills groupCode on finalized matches without touching scores', async () => {
+    const deps = createFixtureSyncDeps();
+    deps.apiFootballClient.isConfigured.mockReturnValue(true);
+    deps.apiFootballClient.fetchWorldCupFixtures.mockResolvedValue([
+      {
+        externalId: '537327',
+        date: '2026-06-11T19:00:00Z',
+        homeTeam: 'Mexico',
+        awayTeam: 'South Africa',
+        homeGoals: 1,
+        awayGoals: 0,
+        externalStatus: 'FINISHED',
+        round: 'GROUP_STAGE',
+        phase: 'GROUPS_1',
+        groupCode: 'GROUP_A',
+      },
+    ]);
+    deps.prisma.match.findUnique.mockResolvedValue({
+      id: 42,
+      finalizedAt: new Date('2026-06-11T21:00:00Z'),
+      groupCode: null,
+    });
+    deps.prisma.match.update.mockResolvedValue({});
+
+    const service = new FixtureSyncService(
+      deps.prisma as never,
+      deps.apiFootballClient as never,
+      deps.recalcService as never,
+    );
+
+    const result = await service.importFixture();
+
+    expect(result).toEqual({
+      importedMatches: 1,
+      createdMatches: 0,
+      updatedMatches: 0,
+      backfilledGroupCodes: 1,
+      skippedUnknownPhase: 0,
+      skippedManualOverride: 0,
+      discoveredTeams: 2,
+    });
+    expect(deps.prisma.match.update).toHaveBeenCalledWith({
+      where: { id: 42 },
+      data: { groupCode: 'GROUP_A' },
+    });
+    expect(deps.recalcService.applyExternalResult).not.toHaveBeenCalled();
   });
 });

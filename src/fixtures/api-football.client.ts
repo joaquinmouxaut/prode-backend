@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { normalizeFootballDataGroupCode } from '../matches/match-group-code';
 import { mapExternalCompetitionStageToPhase } from './fixture-phase.mapper';
 import type { ExternalFixture } from './types';
 
@@ -8,6 +9,7 @@ type FootballDataMatchItem = {
   status?: string;
   stage?: string;
   matchday?: number | null;
+  group?: string | null;
   homeTeam?: {
     name?: string;
   };
@@ -137,6 +139,7 @@ export class ApiFootballClient {
       externalStatus: item.status ?? 'UNKNOWN',
       round: stage,
       phase: mapExternalCompetitionStageToPhase(stage, item.matchday),
+      groupCode: normalizeFootballDataGroupCode(item.group),
     };
   }
 

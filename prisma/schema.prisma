@@ -60,6 +60,7 @@ model Match {
   awayGoals     Int?
   date          DateTime
   phase         Phase
+  groupCode     String?
   externalStatus String?
   resultSource  MatchResultSource?
   manualOverride Boolean          @default(false)

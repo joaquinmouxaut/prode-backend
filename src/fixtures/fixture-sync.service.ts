@@ -17,6 +17,7 @@ const ACTIVE_WINDOW_MS = 6 * 60 * 60 * 1000;
 type ImportExistingMatch = {
   id: number;
   finalizedAt: Date | null;
+  groupCode: string | null;
 };
 
 type ActiveCandidateMatch = {
@@ -31,7 +32,7 @@ type MatchResultSource = 'ADMIN' | 'API' | 'IMPORT';
 interface FixtureMatchModel {
   findUnique(args: {
     where: { externalId: string };
-    select: { id: true; finalizedAt: true };
+    select: { id: true; finalizedAt: true; groupCode: true };
   }): Promise<ImportExistingMatch | null>;
   create(args: {
     data: {
@@ -40,6 +41,7 @@ interface FixtureMatchModel {
       awayTeam: string;
       date: Date;
       phase: Phase;
+      groupCode: string | null;
       externalStatus: string;
       resultSource: MatchResultSource;
       lastSyncedAt: Date;
@@ -55,6 +57,7 @@ interface FixtureMatchModel {
       awayTeam?: string;
       date?: Date;
       phase?: Phase;
+      groupCode?: string | null;
       externalStatus?: string;
       resultSource?: MatchResultSource;
       lastSyncedAt?: Date;
@@ -134,6 +137,7 @@ export class FixtureSyncService implements OnModuleInit, OnModuleDestroy {
         importedMatches: 0,
         createdMatches: 0,
         updatedMatches: 0,
+        backfilledGroupCodes: 0,
         skippedUnknownPhase: 0,
         skippedManualOverride: 0,
         discoveredTeams: 0,
@@ -146,6 +150,7 @@ export class FixtureSyncService implements OnModuleInit, OnModuleDestroy {
     const teamNames = new Set<string>();
     let createdMatches = 0;
     let updatedMatches = 0;
+    let backfilledGroupCodes = 0;
     let skippedUnknownPhase = 0;
 
     for (const fixture of fixtures) {
@@ -159,7 +164,7 @@ export class FixtureSyncService implements OnModuleInit, OnModuleDestroy {
 
       const existing = await matchModel.findUnique({
         where: { externalId: fixture.externalId },
-        select: { id: true, finalizedAt: true },
+        select: { id: true, finalizedAt: true, groupCode: true },
       });
 
       const baseData = {
@@ -167,6 +172,7 @@ export class FixtureSyncService implements OnModuleInit, OnModuleDestroy {
         awayTeam: fixture.awayTeam,
         date: new Date(fixture.date),
         phase: fixture.phase,
+        groupCode: fixture.groupCode,
         externalStatus: fixture.externalStatus,
         resultSource: 'IMPORT' as const,
         lastSyncedAt: new Date(),
@@ -187,6 +193,13 @@ export class FixtureSyncService implements OnModuleInit, OnModuleDestroy {
       }
 
       if (existing.finalizedAt) {
+        if (fixture.groupCode && !existing.groupCode) {
+          await matchModel.update({
+            where: { id: existing.id },
+            data: { groupCode: fixture.groupCode },
+          });
+          backfilledGroupCodes += 1;
+        }
         continue;
       }
 
@@ -202,9 +215,10 @@ export class FixtureSyncService implements OnModuleInit, OnModuleDestroy {
     }
 
     return {
-      importedMatches: createdMatches + updatedMatches,
+      importedMatches: createdMatches + updatedMatches + backfilledGroupCodes,
       createdMatches,
       updatedMatches,
+      backfilledGroupCodes,
       skippedUnknownPhase,
       skippedManualOverride: 0,
       discoveredTeams: teamNames.size,

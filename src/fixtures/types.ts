@@ -10,12 +10,14 @@ export type ExternalFixture = {
   externalStatus: string;
   round: string;
   phase: Phase | null;
+  groupCode: string | null;
 };
 
 export type FixtureImportResult = {
   importedMatches: number;
   createdMatches: number;
   updatedMatches: number;
+  backfilledGroupCodes: number;
   skippedUnknownPhase: number;
   skippedManualOverride: number;
   discoveredTeams: number;
