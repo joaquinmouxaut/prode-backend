@@ -1,15 +1,23 @@
 import { Injectable } from '@nestjs/common';
-import { Phase } from '@prisma/client';
+import { Phase, TeamSide } from '@prisma/client';
+import {
+  deriveAdvancingTeam,
+  isKnockoutPhase,
+} from '../matches/match-phase.util';
 
 type MatchScore = {
   homeGoals: number | null;
   awayGoals: number | null;
   phase: Phase;
+  /** Lado que avanza (mata-mata). Si falta y el marcador es decisivo, se deriva. */
+  winnerSide?: TeamSide | null;
 };
 
 type PredictionScore = {
   homeGoals: number;
   awayGoals: number;
+  /** Lado que el jugador eligió como ganador (mata-mata). */
+  advancingTeam?: TeamSide | null;
 };
 
 const OUTCOME_POINTS = 4;
@@ -25,6 +33,7 @@ const PHASE_MULTIPLIERS: Record<Phase, number> = {
   [Phase.GROUPS_1]: 1,
   [Phase.GROUPS_2]: 1,
   [Phase.GROUPS_3]: 1,
+  [Phase.ROUND_OF_32]: 2,
   [Phase.ROUND_OF_16]: 2,
   [Phase.QUARTER_FINAL]: 2,
   [Phase.SEMI_FINAL]: 2,
@@ -47,10 +56,41 @@ export class PointsService {
     const predHome = prediction.homeGoals;
     const predAway = prediction.awayGoals;
 
+    if (isKnockoutPhase(match.phase)) {
+      return this.calculateKnockoutPoints(prediction, match);
+    }
+
     if (
       this.getOutcome(predHome, predAway) !==
       this.getOutcome(realHome, realAway)
     ) {
+      return 0;
+    }
+
+    const bonus = this.getHighestBonus(predHome, predAway, realHome, realAway);
+    return (OUTCOME_POINTS + bonus) * this.getPhaseMultiplier(match.phase);
+  }
+
+  /**
+   * Puntaje de mata-mata: el "gate" es acertar el equipo que avanza (no el signo).
+   * Si se acierta el avance: 4 base + bonus más alto (sobre el marcador de
+   * 90'+prórroga) × multiplicador de fase. Si no: 0.
+   */
+  private calculateKnockoutPoints(
+    prediction: PredictionScore,
+    match: MatchScore,
+  ): number {
+    const realHome = match.homeGoals as number;
+    const realAway = match.awayGoals as number;
+    const predHome = prediction.homeGoals;
+    const predAway = prediction.awayGoals;
+
+    const realAdvancer =
+      match.winnerSide ?? deriveAdvancingTeam(realHome, realAway);
+    const predAdvancer =
+      prediction.advancingTeam ?? deriveAdvancingTeam(predHome, predAway);
+
+    if (!realAdvancer || !predAdvancer || predAdvancer !== realAdvancer) {
       return 0;
     }
 

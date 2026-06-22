@@ -4,7 +4,7 @@ import {
   OnModuleDestroy,
   OnModuleInit,
 } from '@nestjs/common';
-import { Phase } from '@prisma/client';
+import { MatchDecision, Phase, TeamSide } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ResultRecalculationService } from '../results/result-recalculation.service';
 import { ApiFootballClient } from './api-football.client';
@@ -47,6 +47,8 @@ interface FixtureMatchModel {
       lastSyncedAt: Date;
       homeGoals: number | null;
       awayGoals: number | null;
+      winnerSide: TeamSide | null;
+      decidedBy: MatchDecision | null;
       manualOverride: boolean;
     };
   }): Promise<unknown>;
@@ -63,6 +65,8 @@ interface FixtureMatchModel {
       lastSyncedAt?: Date;
       homeGoals?: number | null;
       awayGoals?: number | null;
+      winnerSide?: TeamSide | null;
+      decidedBy?: MatchDecision | null;
     };
   }): Promise<unknown>;
   findMany(args: {
@@ -176,6 +180,8 @@ export class FixtureSyncService implements OnModuleInit, OnModuleDestroy {
         externalStatus: fixture.externalStatus,
         resultSource: 'IMPORT' as const,
         lastSyncedAt: new Date(),
+        winnerSide: fixture.winnerSide,
+        decidedBy: fixture.decidedBy,
       };
 
       if (!existing) {
@@ -311,6 +317,8 @@ export class FixtureSyncService implements OnModuleInit, OnModuleDestroy {
           awayGoals: fixture.awayGoals,
           externalStatus: fixture.externalStatus,
           syncedAt: this.lastPollAt,
+          winnerSide: fixture.winnerSide,
+          decidedBy: fixture.decidedBy,
         });
 
         details.push({

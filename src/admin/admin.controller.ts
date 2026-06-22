@@ -30,6 +30,8 @@ export class AdminController {
       id,
       body.homeGoals,
       body.awayGoals,
+      body.winnerSide,
+      body.decidedBy,
     );
   }
 

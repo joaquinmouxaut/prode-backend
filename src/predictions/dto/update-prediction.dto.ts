@@ -1,5 +1,6 @@
+import { TeamSide } from '@prisma/client';
 import { Type } from 'class-transformer';
-import { IsInt, Min, IsOptional } from 'class-validator';
+import { IsEnum, IsInt, Min, IsOptional } from 'class-validator';
 
 export class UpdatePredictionDto {
   @IsOptional()
@@ -13,4 +14,9 @@ export class UpdatePredictionDto {
   @IsInt()
   @Min(0)
   awayGoals?: number;
+
+  /** Equipo que el jugador cree que avanza (solo mata-mata). */
+  @IsOptional()
+  @IsEnum(TeamSide)
+  advancingTeam?: TeamSide;
 }

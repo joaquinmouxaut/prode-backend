@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { MatchDecision, TeamSide } from '@prisma/client';
 import { FixtureSyncService } from '../fixtures/fixture-sync.service';
 import { ResultRecalculationService } from '../results/result-recalculation.service';
 import { TournamentBonusService } from '../tournament/tournament-bonus.service';
@@ -15,6 +16,8 @@ export class AdminService {
     matchId: number,
     homeGoals: number,
     awayGoals: number,
+    winnerSide?: TeamSide | null,
+    decidedBy?: MatchDecision | null,
   ) {
     return this.recalcService.applyMatchResult({
       matchId,
@@ -22,6 +25,8 @@ export class AdminService {
       awayGoals,
       source: 'ADMIN',
       syncedAt: new Date(),
+      winnerSide,
+      decidedBy,
     });
   }
 

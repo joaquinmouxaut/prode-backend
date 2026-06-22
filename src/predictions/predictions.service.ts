@@ -1,11 +1,16 @@
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Role } from '@prisma/client';
+import { Phase, Role, TeamSide } from '@prisma/client';
 import { isMatchStarted } from '../matches/match-lifecycle';
+import {
+  deriveAdvancingTeam,
+  isKnockoutPhase,
+} from '../matches/match-phase.util';
 import { MatchLifecycleService } from '../matches/match-lifecycle.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreatePredictionDto } from './dto/create-prediction.dto';
@@ -182,9 +187,49 @@ export class PredictionsService {
     return prediction;
   }
 
+  /**
+   * En mata-mata el jugador debe definir qué equipo avanza: si el marcador es
+   * decisivo se deriva, si es empate debe elegirlo explícitamente. En grupos es null.
+   */
+  private resolveAdvancingTeam(
+    phase: Phase,
+    homeGoals: number,
+    awayGoals: number,
+    provided: TeamSide | null | undefined,
+  ): TeamSide | null {
+    if (!isKnockoutPhase(phase)) {
+      return null;
+    }
+    const resolved = provided ?? deriveAdvancingTeam(homeGoals, awayGoals);
+    if (!resolved) {
+      throw new BadRequestException(
+        'Elegí el equipo que avanza para este partido de eliminatoria',
+      );
+    }
+    return resolved;
+  }
+
+  private async getMatchPhase(matchId: number): Promise<Phase> {
+    const match = await this.prisma.match.findUnique({
+      where: { id: matchId },
+      select: { phase: true },
+    });
+    if (!match) {
+      throw new NotFoundException(`Match ${matchId} not found`);
+    }
+    return match.phase;
+  }
+
   async create(dto: CreatePredictionDto) {
     await this.ensureUserExists(dto.userId);
     await this.matchLifecycle.ensureMatchOpenForPredictions(dto.matchId);
+    const phase = await this.getMatchPhase(dto.matchId);
+    const advancingTeam = this.resolveAdvancingTeam(
+      phase,
+      dto.homeGoals,
+      dto.awayGoals,
+      dto.advancingTeam,
+    );
     try {
       return await this.prisma.prediction.create({
         data: {
@@ -192,6 +237,7 @@ export class PredictionsService {
           matchId: dto.matchId,
           homeGoals: dto.homeGoals,
           awayGoals: dto.awayGoals,
+          advancingTeam,
         },
         include: {
           user: { select: { id: true, name: true, email: true } },
@@ -221,9 +267,21 @@ export class PredictionsService {
   async update(id: number, dto: UpdatePredictionDto) {
     const prediction = await this.findOne(id);
     await this.matchLifecycle.ensureMatchOpenForPredictions(prediction.matchId);
+    const homeGoals = dto.homeGoals ?? prediction.homeGoals;
+    const awayGoals = dto.awayGoals ?? prediction.awayGoals;
+    const advancingTeam = this.resolveAdvancingTeam(
+      prediction.match.phase,
+      homeGoals,
+      awayGoals,
+      dto.advancingTeam ?? prediction.advancingTeam,
+    );
     return this.prisma.prediction.update({
       where: { id },
-      data: dto,
+      data: {
+        ...(dto.homeGoals !== undefined ? { homeGoals: dto.homeGoals } : {}),
+        ...(dto.awayGoals !== undefined ? { awayGoals: dto.awayGoals } : {}),
+        advancingTeam,
+      },
       include: {
         user: { select: { id: true, name: true, email: true } },
         match: {

@@ -3,12 +3,16 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Phase } from '@prisma/client';
+import { MatchDecision, Phase, TeamSide } from '@prisma/client';
 import {
   hasScoreableResult,
   isMatchFinalized,
   isMatchStarted,
 } from '../matches/match-lifecycle';
+import {
+  deriveAdvancingTeam,
+  isKnockoutPhase,
+} from '../matches/match-phase.util';
 import { PointsService } from '../points/points.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { UserTotalsService } from '../tournament/user-totals.service';
@@ -20,6 +24,8 @@ type ApplyMatchResultInput = {
   source: 'ADMIN' | 'API' | 'IMPORT';
   externalStatus?: string | null;
   syncedAt?: Date;
+  winnerSide?: TeamSide | null;
+  decidedBy?: MatchDecision | null;
 };
 
 type ApplyExternalResultInput = {
@@ -28,6 +34,8 @@ type ApplyExternalResultInput = {
   awayGoals: number | null;
   externalStatus: string;
   syncedAt: Date;
+  winnerSide?: TeamSide | null;
+  decidedBy?: MatchDecision | null;
 };
 
 type MatchResultSource = 'ADMIN' | 'API' | 'IMPORT';
@@ -41,6 +49,8 @@ const matchResultSelect = {
   awayGoals: true,
   lastSyncedAt: true,
   finalizedAt: true,
+  winnerSide: true,
+  decidedBy: true,
 } as const;
 
 @Injectable()
@@ -137,9 +147,26 @@ export class ResultRecalculationService {
       } as const;
     }
 
+    const isKnockout = isKnockoutPhase(existingMatch.phase);
+    let resolvedWinnerSide: TeamSide | null = null;
+    let resolvedDecision: MatchDecision | null = null;
+    if (isKnockout) {
+      const derived = deriveAdvancingTeam(input.homeGoals, input.awayGoals);
+      resolvedWinnerSide = input.winnerSide ?? derived;
+      if (!resolvedWinnerSide) {
+        throw new ConflictException(
+          'Knockout match needs the advancing team when the score is a draw',
+        );
+      }
+      resolvedDecision =
+        input.decidedBy ??
+        (derived ? MatchDecision.REGULAR : MatchDecision.PENALTIES);
+    }
+
     const hasScoreChange =
       existingMatch.homeGoals !== input.homeGoals ||
-      existingMatch.awayGoals !== input.awayGoals;
+      existingMatch.awayGoals !== input.awayGoals ||
+      (existingMatch.winnerSide ?? null) !== resolvedWinnerSide;
 
     const wasScoreable = hasScoreableResult(existingMatch);
 
@@ -150,6 +177,8 @@ export class ResultRecalculationService {
         awayGoals: input.awayGoals,
         resultSource: input.source,
         lastSyncedAt: syncedAt,
+        winnerSide: resolvedWinnerSide,
+        decidedBy: resolvedDecision,
         ...(input.externalStatus !== undefined
           ? { externalStatus: input.externalStatus ?? null }
           : {}),
@@ -182,6 +211,7 @@ export class ResultRecalculationService {
       match.phase,
       match.homeGoals,
       match.awayGoals,
+      match.winnerSide,
     );
   }
 
@@ -266,10 +296,26 @@ export class ResultRecalculationService {
       } as const;
     }
 
+    const isKnockout = isKnockoutPhase(match.phase);
+    let resolvedWinnerSide = match.winnerSide ?? null;
+    if (isKnockout) {
+      resolvedWinnerSide =
+        input.winnerSide ??
+        match.winnerSide ??
+        (resolvedGoals.hasCompleteScore
+          ? deriveAdvancingTeam(
+              resolvedGoals.homeGoals as number,
+              resolvedGoals.awayGoals as number,
+            )
+          : null);
+    }
+    const resolvedDecision = input.decidedBy ?? match.decidedBy ?? null;
+
     const hasScoreChange =
       match.homeGoals !== resolvedGoals.homeGoals ||
       match.awayGoals !== resolvedGoals.awayGoals ||
-      match.externalStatus !== externalStatus;
+      match.externalStatus !== externalStatus ||
+      (match.winnerSide ?? null) !== resolvedWinnerSide;
 
     const updateData: {
       externalStatus: string;
@@ -277,10 +323,14 @@ export class ResultRecalculationService {
       resultSource: MatchResultSource;
       homeGoals?: number | null;
       awayGoals?: number | null;
+      winnerSide?: TeamSide | null;
+      decidedBy?: MatchDecision | null;
     } = {
       externalStatus,
       lastSyncedAt: input.syncedAt,
       resultSource: 'API',
+      winnerSide: resolvedWinnerSide,
+      decidedBy: resolvedDecision,
     };
 
     if (resolvedGoals.hasCompleteScore) {
@@ -320,6 +370,7 @@ export class ResultRecalculationService {
       match.phase,
       resolvedGoals.homeGoals,
       resolvedGoals.awayGoals,
+      resolvedWinnerSide,
     );
 
     return { matched: true, ...recalc } as const;
@@ -359,6 +410,7 @@ export class ResultRecalculationService {
       match.phase,
       match.homeGoals,
       match.awayGoals,
+      match.winnerSide,
     );
 
     return {
@@ -418,10 +470,17 @@ export class ResultRecalculationService {
     phase: Phase,
     homeGoals: number | null,
     awayGoals: number | null,
+    winnerSide: TeamSide | null = null,
   ) {
     const predictions = await this.prisma.prediction.findMany({
       where: { matchId },
-      select: { id: true, userId: true, homeGoals: true, awayGoals: true },
+      select: {
+        id: true,
+        userId: true,
+        homeGoals: true,
+        awayGoals: true,
+        advancingTeam: true,
+      },
     });
 
     if (predictions.length === 0 || homeGoals === null || awayGoals === null) {
@@ -435,8 +494,12 @@ export class ResultRecalculationService {
     const recalculatedByPredictionId = new Map<number, number>();
     for (const prediction of predictions) {
       const points = this.pointsService.calculatePredictionPoints(
-        { homeGoals: prediction.homeGoals, awayGoals: prediction.awayGoals },
-        { homeGoals, awayGoals, phase },
+        {
+          homeGoals: prediction.homeGoals,
+          awayGoals: prediction.awayGoals,
+          advancingTeam: prediction.advancingTeam,
+        },
+        { homeGoals, awayGoals, phase, winnerSide },
       );
       recalculatedByPredictionId.set(prediction.id, points);
     }

@@ -35,12 +35,15 @@ export function mapExternalRoundToPhase(round: string): Phase | null {
     }
   }
 
-  if (value.includes('round of 16') || value.includes('octavos')) {
-    return Phase.ROUND_OF_16;
+  // Check round of 32 before round of 16 to avoid the "16" substring shadowing it.
+  if (
+    value.includes('round of 32') ||
+    value.includes('last 32') ||
+    value.includes('dieciseisavos')
+  ) {
+    return Phase.ROUND_OF_32;
   }
-  // The 2026 format introduces round of 32. Until the domain model adds it,
-  // we bucket it into the first knockout phase for scoring parity.
-  if (value.includes('round of 32') || value.includes('last 32')) {
+  if (value.includes('round of 16') || value.includes('octavos')) {
     return Phase.ROUND_OF_16;
   }
   if (value.includes('quarter') || value.includes('cuartos')) {
@@ -86,7 +89,7 @@ export function mapExternalCompetitionStageToPhase(
     return Phase.ROUND_OF_16;
   }
   if (normalizedStage === 'last_32') {
-    return Phase.ROUND_OF_16;
+    return Phase.ROUND_OF_32;
   }
   if (normalizedStage === 'quarter_finals') {
     return Phase.QUARTER_FINAL;

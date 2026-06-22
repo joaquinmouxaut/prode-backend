@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { MatchDecision, TeamSide } from '@prisma/client';
 import { normalizeFootballDataGroupCode } from '../matches/match-group-code';
 import { mapExternalCompetitionStageToPhase } from './fixture-phase.mapper';
 import type { ExternalFixture } from './types';
@@ -17,6 +18,8 @@ type FootballDataMatchItem = {
     name?: string;
   };
   score?: {
+    winner?: string | null;
+    duration?: string | null;
     fullTime?: {
       home?: number | null;
       away?: number | null;
@@ -117,6 +120,33 @@ export class ApiFootballClient {
     return { homeGoals: null, awayGoals: null };
   }
 
+  /** Lado que avanza, leído de score.winner (HOME_TEAM/AWAY_TEAM/DRAW). */
+  private extractWinnerSide(item: FootballDataMatchItem): TeamSide | null {
+    const winner = item.score?.winner?.toUpperCase();
+    if (winner === 'HOME_TEAM') {
+      return TeamSide.HOME;
+    }
+    if (winner === 'AWAY_TEAM') {
+      return TeamSide.AWAY;
+    }
+    return null;
+  }
+
+  /** Cómo se definió el partido, leído de score.duration. */
+  private extractDecision(item: FootballDataMatchItem): MatchDecision | null {
+    const duration = item.score?.duration?.toUpperCase();
+    if (duration === 'PENALTY_SHOOTOUT') {
+      return MatchDecision.PENALTIES;
+    }
+    if (duration === 'EXTRA_TIME') {
+      return MatchDecision.EXTRA_TIME;
+    }
+    if (duration === 'REGULAR') {
+      return MatchDecision.REGULAR;
+    }
+    return null;
+  }
+
   private toExternalFixture(item: FootballDataMatchItem): ExternalFixture | null {
     const fixtureId = item.id;
     const date = item.utcDate;
@@ -140,6 +170,8 @@ export class ApiFootballClient {
       round: stage,
       phase: mapExternalCompetitionStageToPhase(stage, item.matchday),
       groupCode: normalizeFootballDataGroupCode(item.group),
+      winnerSide: this.extractWinnerSide(item),
+      decidedBy: this.extractDecision(item),
     };
   }
 

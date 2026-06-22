@@ -14,7 +14,7 @@ describe('mapExternalRoundToPhase', () => {
     ['Semi-finals', Phase.SEMI_FINAL],
     ['Third Place', Phase.THIRD_PLACE],
     ['Final', Phase.FINAL],
-    ['Round of 32', Phase.ROUND_OF_16],
+    ['Round of 32', Phase.ROUND_OF_32],
   ])('maps "%s" to %s', (round, expected) => {
     expect(mapExternalRoundToPhase(round)).toBe(expected);
   });
@@ -30,7 +30,7 @@ describe('mapExternalCompetitionStageToPhase', () => {
     ['SEMI_FINALS', null, Phase.SEMI_FINAL],
     ['THIRD_PLACE', null, Phase.THIRD_PLACE],
     ['FINAL', null, Phase.FINAL],
-    ['LAST_32', null, Phase.ROUND_OF_16],
+    ['LAST_32', null, Phase.ROUND_OF_32],
   ])('maps stage "%s" (matchday %s) to %s', (stage, matchday, expected) => {
     expect(mapExternalCompetitionStageToPhase(stage, matchday)).toBe(expected);
   });

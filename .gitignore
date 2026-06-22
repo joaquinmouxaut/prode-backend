@@ -6,3 +6,8 @@ node_modules
 /dist
 
 /generated/prisma
+
+# Database backups (never commit production data)
+*.dump
+*.sql.gz
+prode-prod-*.sql

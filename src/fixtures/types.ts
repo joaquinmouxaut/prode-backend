@@ -1,4 +1,4 @@
-import { Phase } from '@prisma/client';
+import { MatchDecision, Phase, TeamSide } from '@prisma/client';
 
 export type ExternalFixture = {
   externalId: string;
@@ -11,6 +11,10 @@ export type ExternalFixture = {
   round: string;
   phase: Phase | null;
   groupCode: string | null;
+  /** Lado que avanza en mata-mata (de score.winner). Null en grupos/sin resolver. */
+  winnerSide: TeamSide | null;
+  /** Cómo se definió el partido (de score.duration). */
+  decidedBy: MatchDecision | null;
 };
 
 export type FixtureImportResult = {
