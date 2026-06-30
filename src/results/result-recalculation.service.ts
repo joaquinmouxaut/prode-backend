@@ -365,6 +365,24 @@ export class ResultRecalculationService {
       } as const;
     }
 
+    // Mata-mata empatado (definición por penales/prórroga) sin ganador resuelto:
+    // todavía no sabemos quién avanza (tanda en curso o `score.winner` aún null).
+    // Guardamos marcador/estado pero NO puntuamos para no asignar 0 a todos ni
+    // un vencedor deducido de un marcador transitorio de la tanda.
+    if (
+      isKnockout &&
+      resolvedGoals.homeGoals === resolvedGoals.awayGoals &&
+      !resolvedWinnerSide
+    ) {
+      return {
+        matched: true,
+        matchId: match.id,
+        recalculatedPredictions: 0,
+        recalculatedUsers: 0,
+        skipped: 'awaiting_winner',
+      } as const;
+    }
+
     const recalc = await this.recalculateForMatch(
       match.id,
       match.phase,

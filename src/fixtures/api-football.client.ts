@@ -28,8 +28,18 @@ type FootballDataMatchItem = {
       home?: number | null;
       away?: number | null;
     };
+    extraTime?: {
+      home?: number | null;
+      away?: number | null;
+    };
+    penalties?: {
+      home?: number | null;
+      away?: number | null;
+    };
   };
 };
+
+type GoalPair = { home: number; away: number };
 
 type FootballDataApiResponse = {
   error?: string;
@@ -96,24 +106,56 @@ export class ApiFootballClient {
     return this.toExternalFixture(match);
   }
 
+  private toGoalPair(node?: {
+    home?: number | null;
+    away?: number | null;
+  }): GoalPair | null {
+    if (typeof node?.home === 'number' && typeof node?.away === 'number') {
+      return { home: node.home, away: node.away };
+    }
+    return null;
+  }
+
+  /**
+   * Marcador "de cancha" (90' + prórroga), sin la tanda de penales.
+   *
+   * football-data.org acumula los penales dentro de `score.fullTime`
+   * (`fullTime = regularTime + extraTime + penalties`), por lo que en un partido
+   * definido por penales `fullTime` NO es el resultado del encuentro sino el del
+   * desempate. Acá reconstruimos el resultado real del partido (que en penales
+   * siempre es empate) para guardarlo y puntuar contra él; el equipo que avanza
+   * se toma aparte de `score.winner` (ver `extractWinnerSide`).
+   */
   private extractGoals(item: FootballDataMatchItem): {
     homeGoals: number | null;
     awayGoals: number | null;
   } {
-    const fullTime = item.score?.fullTime;
-    if (fullTime?.home !== null && fullTime?.home !== undefined) {
-      if (fullTime?.away !== null && fullTime?.away !== undefined) {
-        return { homeGoals: fullTime.home, awayGoals: fullTime.away };
+    const score = item.score;
+    const fullTime = this.toGoalPair(score?.fullTime);
+    const regularTime = this.toGoalPair(score?.regularTime);
+    const extraTime = this.toGoalPair(score?.extraTime);
+    const penalties = this.toGoalPair(score?.penalties);
+
+    if (penalties) {
+      if (regularTime) {
+        return {
+          homeGoals: regularTime.home + (extraTime?.home ?? 0),
+          awayGoals: regularTime.away + (extraTime?.away ?? 0),
+        };
+      }
+      if (fullTime) {
+        return {
+          homeGoals: fullTime.home - penalties.home,
+          awayGoals: fullTime.away - penalties.away,
+        };
       }
     }
 
-    const regularTime = item.score?.regularTime;
-    if (
-      regularTime?.home !== null &&
-      regularTime?.home !== undefined &&
-      regularTime?.away !== null &&
-      regularTime?.away !== undefined
-    ) {
+    if (fullTime) {
+      return { homeGoals: fullTime.home, awayGoals: fullTime.away };
+    }
+
+    if (regularTime) {
       return { homeGoals: regularTime.home, awayGoals: regularTime.away };
     }
 
@@ -147,7 +189,9 @@ export class ApiFootballClient {
     return null;
   }
 
-  private toExternalFixture(item: FootballDataMatchItem): ExternalFixture | null {
+  private toExternalFixture(
+    item: FootballDataMatchItem,
+  ): ExternalFixture | null {
     const fixtureId = item.id;
     const date = item.utcDate;
     const homeTeam = item.homeTeam?.name;
@@ -213,7 +257,9 @@ export class ApiFootballClient {
     return data;
   }
 
-  private async requestMatch(path: string): Promise<FootballDataMatchItem | null> {
+  private async requestMatch(
+    path: string,
+  ): Promise<FootballDataMatchItem | null> {
     const data = await this.request(path);
     if (data.id) {
       return data as FootballDataMatchItem;

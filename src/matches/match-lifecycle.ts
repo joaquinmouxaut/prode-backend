@@ -3,6 +3,8 @@ const API_FINISHED_STATUSES = new Set(['FINISHED', 'AWARDED', 'CANCELLED']);
 const STARTED_STATUSES = new Set([
   'IN_PLAY',
   'PAUSED',
+  'EXTRA_TIME',
+  'PENALTY_SHOOTOUT',
   'FINISHED',
   'AWARDED',
   'SUSPENDED',
@@ -21,14 +23,19 @@ export function isMatchFinalized(match: MatchLifecycleInput): boolean {
   return match.finalizedAt != null;
 }
 
-export function isMatchStarted(match: MatchLifecycleInput, now = new Date()): boolean {
+export function isMatchStarted(
+  match: MatchLifecycleInput,
+  now = new Date(),
+): boolean {
   const status = match.externalStatus?.toUpperCase();
   if (status) {
     if (LIVE_STATUSES.has(status) || STARTED_STATUSES.has(status)) {
       return true;
     }
     if (status === 'TIMED' || status === 'SCHEDULED') {
-      return match.date != null && new Date(match.date).getTime() <= now.getTime();
+      return (
+        match.date != null && new Date(match.date).getTime() <= now.getTime()
+      );
     }
   }
 

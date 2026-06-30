@@ -1,7 +1,6 @@
 import { ConflictException } from '@nestjs/common';
-import { Phase } from '@prisma/client';
+import { MatchDecision, Phase, TeamSide } from '@prisma/client';
 import { PointsService } from '../points/points.service';
-import { UserTotalsService } from '../tournament/user-totals.service';
 import { ResultRecalculationService } from './result-recalculation.service';
 
 function createPrismaMock() {
@@ -269,6 +268,79 @@ describe('ResultRecalculationService', () => {
         awayGoals: 0,
         resultSource: 'API',
       }),
+    });
+  });
+
+  it('does not score a tied knockout match until the advancing team is known', async () => {
+    const prisma = createPrismaMock();
+    prisma.match.findUnique.mockResolvedValue({
+      id: 20,
+      phase: Phase.ROUND_OF_16,
+      date: new Date('2026-07-05T18:00:00.000Z'),
+      homeGoals: null,
+      awayGoals: null,
+      externalStatus: 'PENALTY_SHOOTOUT',
+      lastSyncedAt: new Date('2026-07-05T20:00:00.000Z'),
+      finalizedAt: null,
+    });
+    prisma.match.update.mockResolvedValue({});
+    prisma.prediction.findMany.mockResolvedValue([]);
+
+    const service = createService(prisma);
+    const result = await service.applyExternalResult({
+      externalId: 'ext-20',
+      homeGoals: 1,
+      awayGoals: 1,
+      externalStatus: 'PENALTY_SHOOTOUT',
+      syncedAt: new Date('2026-07-05T20:30:00.000Z'),
+      winnerSide: null,
+      decidedBy: MatchDecision.PENALTIES,
+    });
+
+    expect(result).toMatchObject({
+      matched: true,
+      matchId: 20,
+      skipped: 'awaiting_winner',
+    });
+    expect(prisma.prediction.findMany).not.toHaveBeenCalled();
+    expect(prisma.match.update).toHaveBeenCalled();
+  });
+
+  it('scores a penalty knockout once the API reports the winner', async () => {
+    const prisma = createPrismaMock();
+    prisma.match.findUnique.mockResolvedValue({
+      id: 21,
+      phase: Phase.ROUND_OF_16,
+      date: new Date('2026-07-05T18:00:00.000Z'),
+      homeGoals: 1,
+      awayGoals: 1,
+      externalStatus: 'PENALTY_SHOOTOUT',
+      lastSyncedAt: new Date('2026-07-05T20:30:00.000Z'),
+      finalizedAt: null,
+      winnerSide: null,
+    });
+    prisma.match.update.mockResolvedValue({});
+    prisma.prediction.findMany.mockResolvedValue([
+      { id: 300, userId: 7, homeGoals: 1, awayGoals: 1, advancingTeam: 'AWAY' },
+    ]);
+    prisma.prediction.update.mockResolvedValue({});
+
+    const service = createService(prisma);
+    const result = await service.applyExternalResult({
+      externalId: 'ext-21',
+      homeGoals: 1,
+      awayGoals: 1,
+      externalStatus: 'FINISHED',
+      syncedAt: new Date('2026-07-05T20:45:00.000Z'),
+      winnerSide: TeamSide.AWAY,
+      decidedBy: MatchDecision.PENALTIES,
+    });
+
+    expect(result).toMatchObject({
+      matched: true,
+      matchId: 21,
+      recalculatedPredictions: 1,
+      recalculatedUsers: 1,
     });
   });
 
