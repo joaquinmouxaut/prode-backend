@@ -5,16 +5,20 @@ import { LeaderboardService } from './leaderboard.service';
 
 describe('LeaderboardService', () => {
   const findMany = jest.fn();
+  const predictionFindMany = jest.fn();
   const hasTournamentStarted = jest.fn();
   let service: LeaderboardService;
 
   beforeEach(() => {
     findMany.mockReset();
+    predictionFindMany.mockReset();
     hasTournamentStarted.mockReset();
     hasTournamentStarted.mockResolvedValue(true);
+    predictionFindMany.mockResolvedValue([]);
     service = new LeaderboardService(
       {
         user: { findMany },
+        prediction: { findMany: predictionFindMany },
       } as unknown as PrismaService,
       {
         hasTournamentStarted,
@@ -124,5 +128,47 @@ describe('LeaderboardService', () => {
     expect(result.tournamentPicksVisible).toBe(false);
     expect(result.rows[0].user.championPick).toBeNull();
     expect(result.rows[0].user.topScorerPick).toBeNull();
+  });
+
+  it('includes knockout round breakdown in byPhase', async () => {
+    findMany.mockResolvedValue([
+      {
+        id: 1,
+        name: 'Ana',
+        email: 'ana@example.com',
+        championPick: null,
+        topScorerPick: null,
+        totalPoints: 40,
+        championPoints: 0,
+        topScorerPoints: 0,
+        groups1: 0,
+        groups2: 0,
+        groups3: 0,
+        knockout: 40,
+      },
+    ]);
+    predictionFindMany.mockResolvedValue([
+      {
+        userId: 1,
+        points: 16,
+        match: { phase: Phase.ROUND_OF_16 },
+      },
+      {
+        userId: 1,
+        points: 24,
+        match: { phase: Phase.FINAL },
+      },
+    ]);
+
+    const result = await service.findAll();
+
+    expect(predictionFindMany).toHaveBeenCalled();
+    expect(result.rows[0].byPhase).toEqual({
+      [Phase.GROUPS_1]: 0,
+      [Phase.GROUPS_2]: 0,
+      [Phase.GROUPS_3]: 0,
+      [Phase.ROUND_OF_16]: 16,
+      [Phase.FINAL]: 24,
+    });
   });
 });
