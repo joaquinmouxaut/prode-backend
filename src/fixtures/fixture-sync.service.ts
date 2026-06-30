@@ -89,7 +89,7 @@ export class FixtureSyncService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(FixtureSyncService.name);
   private interval: NodeJS.Timeout | null = null;
   private readonly frequencyMinutes = Number(
-    process.env.FIXTURE_POLL_MINUTES ?? '15',
+    process.env.FIXTURE_POLL_MINUTES ?? '10',
   );
   private readonly maxRequestsPerDay = Number(
     process.env.FOOTBALL_API_MAX_REQUESTS_PER_DAY ?? '80',
@@ -364,7 +364,9 @@ export class FixtureSyncService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private async listPotentiallyActiveMatches(): Promise<ActiveCandidateMatch[]> {
+  private async listPotentiallyActiveMatches(): Promise<
+    ActiveCandidateMatch[]
+  > {
     const now = new Date();
     const windowStart = new Date(now.getTime() - ACTIVE_WINDOW_MS);
     const matchModel = this.getMatchModel();
